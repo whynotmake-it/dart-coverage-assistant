@@ -39,6 +39,7 @@ export function verifyCoverageThreshold(projects: CoveredProject[]): boolean {
 
 export function verifyNoCoverageDecrease(projects: CoveredProject[]): boolean {
   // TODO
+  projects
   if (Config.enforceForbiddenDecrease === 'none') {
     return true
   }

@@ -1,5 +1,4 @@
 import parse from 'lcov-parse'
-import * as fs from 'fs'
 import { Project } from './finder'
 
 export interface CoveredProject {
@@ -36,12 +35,12 @@ export async function coverProject(project: Project): Promise<CoveredProject> {
 async function parseLcov(
   project: Project
 ): Promise<parse.LcovFile[] | undefined> {
-  if (!project.coverageFile) {
+  const file = project.coverageFile
+  if (!file) {
     return undefined
   }
-
   return new Promise((resolve, reject) => {
-    parse(project.coverageFile!, (err, data) => {
+    parse(file, (err, data) => {
       if (err) {
         reject(err)
       }

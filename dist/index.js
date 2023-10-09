@@ -5308,12 +5308,24 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Config = void 0;
 const core_1 = __nccwpck_require__(2186);
 class Config {
-    static githubToken = (0, core_1.getInput)('GITHUB_TOKEN', { required: true });
-    static upperCoverageThreshold = parseFloat((0, core_1.getInput)('upper_threshold', { required: true }));
-    static lowerCoverageThreshold = parseFloat((0, core_1.getInput)('lower_threshold', { required: true }));
-    static compareAgainstBase = (0, core_1.getInput)('compare_against_base', { required: true }) == 'true';
-    static enforceCoverageThreshold = this.parseCoverageRule((0, core_1.getInput)('enforce_coverage_threshold', { required: true }));
-    static enforceForbiddenDecrease = this.parseCoverageRule((0, core_1.getInput)('enforce_forbidden_decrease', { required: true }));
+    static get githubToken() {
+        return (0, core_1.getInput)('GITHUB_TOKEN', { required: true });
+    }
+    static get upperCoverageThreshold() {
+        return parseFloat((0, core_1.getInput)('upper_threshold', { required: true }));
+    }
+    static get lowerCoverageThreshold() {
+        return parseFloat((0, core_1.getInput)('lower_threshold', { required: true }));
+    }
+    static get compareAgainstBase() {
+        return (0, core_1.getInput)('compare_against_base', { required: true }) === 'true';
+    }
+    static get enforceCoverageThreshold() {
+        return this.parseCoverageRule((0, core_1.getInput)('enforce_coverage_threshold', { required: true }));
+    }
+    static get enforceForbiddenDecrease() {
+        return this.parseCoverageRule((0, core_1.getInput)('enforce_forbidden_decrease', { required: true }));
+    }
     static parseCoverageRule(rule) {
         switch (rule) {
             case 'none':
@@ -5447,11 +5459,12 @@ async function coverProject(project) {
 }
 exports.coverProject = coverProject;
 async function parseLcov(project) {
-    if (!project.coverageFile) {
+    const file = project.coverageFile;
+    if (!file) {
         return undefined;
     }
     return new Promise((resolve, reject) => {
-        (0, lcov_parse_1.default)(project.coverageFile, (err, data) => {
+        (0, lcov_parse_1.default)(file, (err, data) => {
             if (err) {
                 reject(err);
             }
@@ -5569,16 +5582,16 @@ exports.buildMessage = void 0;
 const lcov_1 = __nccwpck_require__(4888);
 const config_1 = __nccwpck_require__(6373);
 function buildMessage(projects) {
-    var md = '';
+    let md = '';
     md += '# Coverage Report\n';
     for (const project of projects) {
-        md += buildTable(project) + '\n';
+        md = buildTable(project) + '\n';
     }
     return md;
 }
 exports.buildMessage = buildMessage;
 function buildTable(project) {
-    var md = '';
+    let md = '';
     md += buildHeader(project) + '\n';
     md += buildBody(project) + '\n';
     return md;
@@ -5591,7 +5604,7 @@ function buildHeader(project) {
         ? `<td>${percentage.toFixed(2)}%</td>`
         : '<td>⚠️</td>';
     const diff = getDiff(project);
-    var diffCell;
+    let diffCell;
     if (diff === undefined) {
         diffCell = '<td>-</td>';
     }
@@ -5622,7 +5635,7 @@ function buildBody(project) {
     if (project.coverage === undefined) {
         return '';
     }
-    var tableMd = '';
+    let tableMd = '';
     tableMd += '| File | Line Percentage | Line Count |\n';
     tableMd += '| --- | --- | --- |\n';
     const folders = {};
@@ -5735,6 +5748,7 @@ function verifyCoverageThreshold(projects) {
 exports.verifyCoverageThreshold = verifyCoverageThreshold;
 function verifyNoCoverageDecrease(projects) {
     // TODO
+    projects;
     if (config_1.Config.enforceForbiddenDecrease === 'none') {
         return true;
     }

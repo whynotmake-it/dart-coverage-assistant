@@ -1,18 +1,18 @@
-import parse, { LcovFile } from 'lcov-parse'
+import { LcovFile } from 'lcov-parse'
 import { CoveredProject, getLcovPercentage, getProjectPercentage } from './lcov'
 import { Config } from './config'
 
 export function buildMessage(projects: CoveredProject[]): string {
-  var md = ''
+  let md = ''
   md += '# Coverage Report\n'
   for (const project of projects) {
-    md += buildTable(project) + '\n'
+    md = buildTable(project) + '\n'
   }
   return md
 }
 
 function buildTable(project: CoveredProject): string {
-  var md = ''
+  let md = ''
   md += buildHeader(project) + '\n'
   md += buildBody(project) + '\n'
   return md
@@ -26,7 +26,7 @@ function buildHeader(project: CoveredProject): string {
     ? `<td>${percentage.toFixed(2)}%</td>`
     : '<td>⚠️</td>'
   const diff = getDiff(project)
-  var diffCell: string
+  let diffCell: string
   if (diff === undefined) {
     diffCell = '<td>-</td>'
   } else if (diff === 0) {
@@ -62,7 +62,7 @@ function buildBody(project: CoveredProject): string {
   if (project.coverage === undefined) {
     return ''
   }
-  var tableMd = ''
+  let tableMd = ''
   tableMd += '| File | Line Percentage | Line Count |\n'
   tableMd += '| --- | --- | --- |\n'
   const folders: Record<string, LcovFile[]> = {}

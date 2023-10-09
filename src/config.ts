@@ -3,26 +3,33 @@ import { getInput } from '@actions/core'
 type CoverageRule = 'none' | 'single' | 'total'
 
 export class Config {
-  static githubToken: string = getInput('GITHUB_TOKEN', { required: true })
+  static get githubToken(): string {
+    return getInput('GITHUB_TOKEN', { required: true })
+  }
 
-  static upperCoverageThreshold: number = parseFloat(
-    getInput('upper_threshold', { required: true })
-  )
+  static get upperCoverageThreshold(): number {
+    return parseFloat(getInput('upper_threshold', { required: true }))
+  }
 
-  static lowerCoverageThreshold: number = parseFloat(
-    getInput('lower_threshold', { required: true })
-  )
+  static get lowerCoverageThreshold(): number {
+    return parseFloat(getInput('lower_threshold', { required: true }))
+  }
 
-  static compareAgainstBase: boolean =
-    getInput('compare_against_base', { required: true }) == 'true'
+  static get compareAgainstBase(): boolean {
+    return getInput('compare_against_base', { required: true }) === 'true'
+  }
 
-  static enforceCoverageThreshold: CoverageRule = this.parseCoverageRule(
-    getInput('enforce_coverage_threshold', { required: true })
-  )
+  static get enforceCoverageThreshold(): CoverageRule {
+    return this.parseCoverageRule(
+      getInput('enforce_coverage_threshold', { required: true })
+    )
+  }
 
-  static enforceForbiddenDecrease: CoverageRule = this.parseCoverageRule(
-    getInput('enforce_forbidden_decrease', { required: true })
-  )
+  static get enforceForbiddenDecrease(): CoverageRule {
+    return this.parseCoverageRule(
+      getInput('enforce_forbidden_decrease', { required: true })
+    )
+  }
 
   private static parseCoverageRule(rule: string): CoverageRule {
     switch (rule) {
