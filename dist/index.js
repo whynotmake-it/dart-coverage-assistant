@@ -5583,9 +5583,9 @@ const lcov_1 = __nccwpck_require__(4888);
 const config_1 = __nccwpck_require__(6373);
 function buildMessage(projects) {
     let md = '';
-    md += '# Coverage Report\n';
+    md += '# Coverage Report\n\n';
     for (const project of projects) {
-        md = buildTable(project) + '\n';
+        md += buildTable(project) + '\n';
     }
     return md;
 }
@@ -5621,14 +5621,14 @@ function buildHeader(project) {
         ? `<th>${buildBadgetableMd(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}</th>`
         : '<th>-</th>';
     return `<table>\n
-    <thead>\n
+    <tbody>\n
         <tr>\n
             <th>${project.name}</th>\n
             ${percentageCell}\n
             ${diffCell}\n
             ${badgeCell}\n
         </tr>\n
-    </thead>\n
+    </tbody>\n
     </table>`;
 }
 function buildBody(project) {
@@ -5659,7 +5659,7 @@ function buildBody(project) {
     tableMd += '\n';
     return `<details>
         <summary>Coverage Details</summary>\n
-        ${tableMd}\n</details>`;
+        ${tableMd}\n</details>\n`;
 }
 function getDiff(project) {
     if (project.coverageBefore === undefined || !project.coverage) {

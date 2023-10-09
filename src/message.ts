@@ -4,9 +4,9 @@ import { Config } from './config'
 
 export function buildMessage(projects: CoveredProject[]): string {
   let md = ''
-  md += '# Coverage Report\n'
+  md += '# Coverage Report\n\n'
   for (const project of projects) {
-    md = buildTable(project) + '\n'
+    md += buildTable(project) + '\n'
   }
   return md
 }
@@ -47,14 +47,14 @@ function buildHeader(project: CoveredProject): string {
     : '<th>-</th>'
 
   return `<table>\n
-    <thead>\n
+    <tbody>\n
         <tr>\n
             <th>${project.name}</th>\n
             ${percentageCell}\n
             ${diffCell}\n
             ${badgeCell}\n
         </tr>\n
-    </thead>\n
+    </tbody>\n
     </table>`
 }
 
@@ -92,7 +92,7 @@ function buildBody(project: CoveredProject): string {
 
   return `<details>
         <summary>Coverage Details</summary>\n
-        ${tableMd}\n</details>`
+        ${tableMd}\n</details>\n`
 }
 
 function getDiff(project: CoveredProject): number | undefined {
