@@ -3,6 +3,9 @@ import { findProjects } from './finder'
 import { coverProject } from './lcov'
 import { buildMessage } from './message'
 import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor'
+import { commitAndPushChanges, configureGit } from './git'
+import { generateBadges } from './badge'
+import { context } from '@actions/github'
 
 /**
  * The main function for the action.
@@ -10,7 +13,10 @@ import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor'
  */
 export async function run(): Promise<void> {
   try {
+    core.info(`Configuring git...`)
+    await configureGit()
     core.info(`Finding projects...`)
+
     const projects = await findProjects(null)
     core.info(`Found ${projects.length} projects`)
 
@@ -20,6 +26,10 @@ export async function run(): Promise<void> {
     core.info(
       `${coveredProjects.filter(p => p.coverage).length} projects covered.`
     )
+
+    core.info('Updating and pushing coverage badge...')
+    generateBadges(coveredProjects);
+    commitAndPushChanges('chore: coverage badges [skip ci]');
 
     core.info(`Building message...`)
     const message = buildMessage(coveredProjects)

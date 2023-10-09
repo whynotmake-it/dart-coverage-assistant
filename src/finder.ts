@@ -4,6 +4,7 @@ import * as glob from '@actions/glob'
 export interface Project {
   name: string
   description: string
+  pubspecFile: string
   coverageFile: string | null
 }
 
@@ -24,6 +25,16 @@ export async function findProjects(
   const globber = await glob.create(`**/pubspec.yaml\n${excludes}`)
   const results = await globber.glob()
   const files = results.filter(f => fs.lstatSync(f).isFile())
+
+  // Sort files by depth and then alphabetically
+  files.sort((a, b) => {
+    const aDepth = a.split('/').length
+    const bDepth = b.split('/').length
+    if (aDepth === bDepth) {
+      return a.localeCompare(b)
+    }
+    return aDepth - bDepth
+  })
 
   const projects: Project[] = []
   for (const file of files) {
@@ -64,6 +75,7 @@ function getProject(file: string): Project | null {
     return {
       name,
       description,
+      pubspecFile: file,
       coverageFile: containsCoverage ? coverageFile : null
     }
   }

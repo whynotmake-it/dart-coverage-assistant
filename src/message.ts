@@ -1,6 +1,7 @@
 import { LcovFile } from 'lcov-parse'
 import { CoveredProject, getLcovPercentage, getProjectPercentage } from './lcov'
 import { Config } from './config'
+import { buildBadgeUrl } from './badge'
 
 export function buildMessage(projects: CoveredProject[]): string {
   let md = ''
@@ -38,11 +39,11 @@ function buildHeader(project: CoveredProject): string {
 
   const badgeCell = percentage
     ? `${buildBadge(
-        project.name,
-        Config.upperCoverageThreshold,
-        Config.lowerCoverageThreshold,
-        percentage
-      )}`
+      project.name,
+      Config.upperCoverageThreshold,
+      Config.lowerCoverageThreshold,
+      percentage
+    )}`
     : ''
 
   let md = `## ${project.name} ${badgeCell}\n`
@@ -77,9 +78,8 @@ function buildBody(project: CoveredProject): string {
     tableMd += `| **${folder}** |   |   |\n`
     for (const file of folders[folder]) {
       const name = file.file.split('/').slice(-1)[0]
-      tableMd += `| ${name} | ${getLcovPercentage([file])} | ${
-        file.lines.details.length
-      } |\n`
+      tableMd += `| ${name} | ${getLcovPercentage([file])} | ${file.lines.details.length
+        } |\n`
     }
     tableMd += '| --- | --- | --- |\n'
   }
@@ -111,16 +111,8 @@ function buildBadge(
   lower: number,
   percentage: number
 ): string {
-  const percentageString = percentage.toFixed(2) + '%'
   const alt =
     percentage >= upper ? 'pass' : percentage >= lower ? 'warning' : 'fail'
-  const color =
-    percentage >= upper
-      ? 'success'
-      : percentage >= lower
-      ? 'important'
-      : 'critical'
-  const url = `https://img.shields.io/badge/${name}-${percentageString}-${color}`
-
+  const url = buildBadgeUrl(name, upper, lower, percentage);
   return `![${alt}](${encodeURI(url)} "${alt}")`
 }

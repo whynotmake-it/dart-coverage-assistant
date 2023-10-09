@@ -5,6 +5,8 @@ export interface CoveredProject {
   name: string
   description: string
 
+  pubspecFile: string
+
   /**
    * Parsed coverage files for this project. If undefined, this project wasn't covered.
    */
@@ -27,6 +29,7 @@ export async function coverProject(project: Project): Promise<CoveredProject> {
   return {
     name: project.name,
     description: project.description,
+    pubspecFile: project.pubspecFile,
     coverage: await parseLcov(project),
     coverageBefore: undefined
   }
