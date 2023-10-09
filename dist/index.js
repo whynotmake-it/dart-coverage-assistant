@@ -13469,11 +13469,10 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.buildBadgeUrl = exports.generateBadges = void 0;
+const fs = __importStar(__nccwpck_require__(7147));
 const config_1 = __nccwpck_require__(6373);
 const lcov_1 = __nccwpck_require__(4888);
-const fs = __importStar(__nccwpck_require__(7147));
 async function generateBadges(projects) {
-    const svgs = [];
     for (const project of projects.filter(p => p.coverage)) {
         const percentage = (0, lcov_1.getProjectPercentage)(project);
         if (percentage === undefined) {
