@@ -6930,7 +6930,7 @@ async function run() {
             (0, git_1.commitAndPushChanges)('chore: coverage badges [skip ci]');
         }
         catch (error) {
-            core.warning('Failed to commit and push coverage badge.');
+            core.warning(`Failed to commit and push coverage badge due to ${error}.`);
         }
         core.info(`Building message...`);
         const message = (0, message_1.buildMessage)(coveredProjects);

@@ -32,7 +32,7 @@ export async function run(): Promise<void> {
       await generateBadges(coveredProjects)
       commitAndPushChanges('chore: coverage badges [skip ci]')
     } catch (error) {
-      core.warning('Failed to commit and push coverage badge.')
+      core.warning(`Failed to commit and push coverage badge due to ${error}.`)
     }
 
     core.info(`Building message...`)
