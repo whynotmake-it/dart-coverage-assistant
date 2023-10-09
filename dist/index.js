@@ -5619,7 +5619,7 @@ function buildHeader(project) {
     const badgeCell = percentage
         ? `${buildBadgetableMd(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}`
         : '';
-    let md = `## ${project.name} ${badgeCell}}\n`;
+    let md = `## ${project.name} ${badgeCell}\n`;
     md += '\n';
     md += `> ${project.description}\n`;
     md += '\n';
@@ -5671,7 +5671,7 @@ function getDiff(project) {
     return current - before;
 }
 function buildBadgetableMd(name, upper, lower, percentage) {
-    const percentageString = percentage.toFixed(2) + '%25';
+    const percentageString = percentage.toFixed(2) + '%';
     const alt = percentage >= upper ? 'pass' : percentage >= lower ? 'warning' : 'fail';
     const color = percentage >= upper
         ? 'success'

@@ -45,7 +45,7 @@ function buildHeader(project: CoveredProject): string {
       )}`
     : ''
 
-  let md = `## ${project.name} ${badgeCell}}\n`
+  let md = `## ${project.name} ${badgeCell}\n`
   md += '\n'
   md += `> ${project.description}\n`
   md += '\n'
@@ -111,7 +111,7 @@ function buildBadgetableMd(
   lower: number,
   percentage: number
 ): string {
-  const percentageString = percentage.toFixed(2) + '%25'
+  const percentageString = percentage.toFixed(2) + '%'
   const alt =
     percentage >= upper ? 'pass' : percentage >= lower ? 'warning' : 'fail'
   const color =
