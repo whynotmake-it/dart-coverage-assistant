@@ -58,18 +58,19 @@ async function buildSvg(
 }
 
 export function buildBadgeUrl(
-  name: string,
+  name: string | undefined,
   upper: number,
   lower: number,
   percentage: number
 ): string {
-  const percentageString = percentage.toFixed(2) + '%'
   const color =
     percentage >= upper
       ? 'success'
       : percentage >= lower
       ? 'important'
       : 'critical'
-  const url = `https://img.shields.io/badge/${name}-${percentageString}-${color}`
-  return encodeURI(url)
+  const firstHalf = encodeURI(name ? name + '-' : 'coverage')
+  const secondHalf = encodeURI(percentage.toFixed(2) + '%')
+
+  return `https://img.shields.io/badge/${firstHalf}${secondHalf}-${color}`
 }

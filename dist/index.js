@@ -13502,14 +13502,14 @@ async function buildSvg(name, upper, lower, percentage) {
     return svg;
 }
 function buildBadgeUrl(name, upper, lower, percentage) {
-    const percentageString = percentage.toFixed(2) + '%';
     const color = percentage >= upper
         ? 'success'
         : percentage >= lower
             ? 'important'
             : 'critical';
-    const url = `https://img.shields.io/badge/${name}-${percentageString}-${color}`;
-    return encodeURI(url);
+    const firstHalf = encodeURI(name ? name + '-' : 'coverage');
+    const secondHalf = encodeURI(percentage.toFixed(2) + '%');
+    return `https://img.shields.io/badge/${firstHalf}${secondHalf}-${color}`;
 }
 exports.buildBadgeUrl = buildBadgeUrl;
 
@@ -13919,7 +13919,7 @@ function buildHeader(project) {
         diffCell = `⬇️ ${diff.toFixed(2)}%`;
     }
     const badgeCell = percentage
-        ? `${buildBadge(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}`
+        ? `${buildBadge(config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}`
         : '';
     let md = `## ${project.name} ${badgeCell}\n`;
     md += '\n';
@@ -13952,7 +13952,6 @@ function buildBody(project) {
             const name = file.file.split('/').slice(-1)[0];
             tableMd += `| ${name} | ${(0, lcov_1.getLcovPercentage)([file])} | ${file.lines.details.length} |\n`;
         }
-        tableMd += '| --- | --- | --- |\n';
     }
     let md = '<details>\n';
     md += `<summary>Coverage Details ${project.name}</summary>\n`;
@@ -13972,9 +13971,9 @@ function getDiff(project) {
         : (0, lcov_1.getLcovPercentage)(project.coverageBefore);
     return current - before;
 }
-function buildBadge(name, upper, lower, percentage) {
+function buildBadge(upper, lower, percentage) {
     const alt = percentage >= upper ? 'pass' : percentage >= lower ? 'warning' : 'fail';
-    const url = (0, badge_1.buildBadgeUrl)(name, upper, lower, percentage);
+    const url = (0, badge_1.buildBadgeUrl)(undefined, upper, lower, percentage);
     return `![${alt}](${encodeURI(url)} "${alt}")`;
 }
 

@@ -39,7 +39,6 @@ function buildHeader(project: CoveredProject): string {
 
   const badgeCell = percentage
     ? `${buildBadge(
-        project.name,
         Config.upperCoverageThreshold,
         Config.lowerCoverageThreshold,
         percentage
@@ -82,7 +81,6 @@ function buildBody(project: CoveredProject): string {
         file.lines.details.length
       } |\n`
     }
-    tableMd += '| --- | --- | --- |\n'
   }
 
   let md = '<details>\n'
@@ -106,14 +104,9 @@ function getDiff(project: CoveredProject): number | undefined {
   return current - before
 }
 
-function buildBadge(
-  name: string,
-  upper: number,
-  lower: number,
-  percentage: number
-): string {
+function buildBadge(upper: number, lower: number, percentage: number): string {
   const alt =
     percentage >= upper ? 'pass' : percentage >= lower ? 'warning' : 'fail'
-  const url = buildBadgeUrl(name, upper, lower, percentage)
+  const url = buildBadgeUrl(undefined, upper, lower, percentage)
   return `![${alt}](${encodeURI(url)} "${alt}")`
 }
