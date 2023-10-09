@@ -14,7 +14,6 @@ import { context } from '@actions/github'
 export async function run(): Promise<void> {
   try {
     core.info(`Configuring git...`)
-    await configureGit()
     core.info(`Finding projects...`)
 
     const projects = await findProjects(null)
@@ -27,12 +26,22 @@ export async function run(): Promise<void> {
       `${coveredProjects.filter(p => p.coverage).length} projects covered.`
     )
 
-    try {
-      core.info('Updating and pushing coverage badge...')
-      await generateBadges(coveredProjects)
-      commitAndPushChanges('chore: coverage badges [skip ci]')
-    } catch (error) {
-      core.warning(`Failed to commit and push coverage badge due to ${error}.`)
+    // If we are in a PR
+    if (context.payload.pull_request) {
+      try {
+        // Get ref of current branch
+        const ref = context.ref
+        core.info(`Setting up git with ${ref}...`)
+        await configureGit(ref)
+
+        core.info('Updating and pushing coverage badge...')
+        await generateBadges(coveredProjects)
+        await commitAndPushChanges('chore: coverage badges [skip ci]')
+      } catch (error) {
+        core.warning(
+          `Failed to commit and push coverage badge due to ${error}.`
+        )
+      }
     }
 
     core.info(`Building message...`)
