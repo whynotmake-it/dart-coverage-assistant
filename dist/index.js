@@ -5555,10 +5555,10 @@ async function run() {
         const coverageThresholdMet = (0, semaphor_1.verifyCoverageThreshold)(coveredProjects);
         const noDecreaseMet = (0, semaphor_1.verifyNoCoverageDecrease)(coveredProjects);
         if (coverageThresholdMet && noDecreaseMet) {
-            core.setFailed('Configured conditions were not met.');
+            core.setOutput('message', message);
         }
         else {
-            core.setOutput('message', message);
+            core.setFailed('Configured conditions were not met.');
         }
     }
     catch (error) {
