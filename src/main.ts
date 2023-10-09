@@ -28,8 +28,8 @@ export async function run(): Promise<void> {
     )
 
     core.info('Updating and pushing coverage badge...')
-    generateBadges(coveredProjects);
-    commitAndPushChanges('chore: coverage badges [skip ci]');
+    generateBadges(coveredProjects)
+    commitAndPushChanges('chore: coverage badges [skip ci]')
 
     core.info(`Building message...`)
     const message = buildMessage(coveredProjects)

@@ -39,11 +39,11 @@ function buildHeader(project: CoveredProject): string {
 
   const badgeCell = percentage
     ? `${buildBadge(
-      project.name,
-      Config.upperCoverageThreshold,
-      Config.lowerCoverageThreshold,
-      percentage
-    )}`
+        project.name,
+        Config.upperCoverageThreshold,
+        Config.lowerCoverageThreshold,
+        percentage
+      )}`
     : ''
 
   let md = `## ${project.name} ${badgeCell}\n`
@@ -78,8 +78,9 @@ function buildBody(project: CoveredProject): string {
     tableMd += `| **${folder}** |   |   |\n`
     for (const file of folders[folder]) {
       const name = file.file.split('/').slice(-1)[0]
-      tableMd += `| ${name} | ${getLcovPercentage([file])} | ${file.lines.details.length
-        } |\n`
+      tableMd += `| ${name} | ${getLcovPercentage([file])} | ${
+        file.lines.details.length
+      } |\n`
     }
     tableMd += '| --- | --- | --- |\n'
   }
@@ -113,6 +114,6 @@ function buildBadge(
 ): string {
   const alt =
     percentage >= upper ? 'pass' : percentage >= lower ? 'warning' : 'fail'
-  const url = buildBadgeUrl(name, upper, lower, percentage);
+  const url = buildBadgeUrl(name, upper, lower, percentage)
   return `![${alt}](${encodeURI(url)} "${alt}")`
 }
