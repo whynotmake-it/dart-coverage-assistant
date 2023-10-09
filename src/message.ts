@@ -39,11 +39,11 @@ function buildHeader(project: CoveredProject): string {
 
   const badgeCell = percentage
     ? `<th>${buildBadgetableMd(
-      project.name,
-      Config.upperCoverageThreshold,
-      Config.lowerCoverageThreshold,
-      percentage
-    )}</th>`
+        project.name,
+        Config.upperCoverageThreshold,
+        Config.lowerCoverageThreshold,
+        percentage
+      )}</th>`
     : '<th>-</th>'
 
   return `<table>\n
@@ -81,8 +81,9 @@ function buildBody(project: CoveredProject): string {
     tableMd += '| --- | --- | --- |\n'
     for (const file of folders[folder]) {
       const name = file.file.split('/').slice(-1)[0]
-      tableMd += `| ${name} | ${getLcovPercentage([file])} | ${file.lines.details.length
-        } |\n`
+      tableMd += `| ${name} | ${getLcovPercentage([file])} | ${
+        file.lines.details.length
+      } |\n`
     }
     tableMd += '| --- | --- | --- |\n'
   }
@@ -119,8 +120,8 @@ function buildBadgetableMd(
     percentage >= upper
       ? 'success'
       : percentage >= lower
-        ? 'important'
-        : 'critical'
+      ? 'important'
+      : 'critical'
   const url = `https://img.shields.io/badge/${name}-${percentageString}-${color}`
   return `![${alt}](${url} "${alt}")`
 }

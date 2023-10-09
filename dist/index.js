@@ -5618,12 +5618,12 @@ function buildHeader(project) {
         diffCell = `<th>⬇️ ${diff.toFixed(2)}%</th>`;
     }
     const badgeCell = percentage
-        ? `<td>${buildBadgetableMd(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}</td>`
-        : '<td>-</td>';
+        ? `<th>${buildBadgetableMd(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}</th>`
+        : '<th>-</th>';
     return `<table>\n
     <thead>\n
         <tr>\n
-            <th>${project.name}</td>\n
+            <th>${project.name}</th>\n
             ${percentageCell}\n
             ${diffCell}\n
             ${badgeCell}\n
@@ -5658,9 +5658,8 @@ function buildBody(project) {
     }
     tableMd += '\n';
     return `<details>
-        <summary>Coverage Details</summary>
-        ${tableMd}
-    </details>`;
+        <summary>Coverage Details</summary>\n
+        ${tableMd}\n</details>`;
 }
 function getDiff(project) {
     if (project.coverageBefore === undefined || !project.coverage) {
