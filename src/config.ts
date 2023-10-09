@@ -19,9 +19,9 @@ export class Config {
     return getInput('compare_against_base') === 'true'
   }
 
-  static get enforceCoverageThreshold(): CoverageRule {
+  static get enforceThreshold(): CoverageRule {
     return this.parseCoverageRule(
-      getInput('enforce_coverage_threshold')
+      getInput('enforce_threshold')
     )
   }
 

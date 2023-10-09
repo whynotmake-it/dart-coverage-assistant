@@ -7,10 +7,10 @@ import {
 import * as core from '@actions/core'
 
 export function verifyCoverageThreshold(projects: CoveredProject[]): boolean {
-  if (Config.enforceCoverageThreshold === 'none') {
+  if (Config.enforceThreshold === 'none') {
     return true
   }
-  if (Config.enforceCoverageThreshold === 'single') {
+  if (Config.enforceThreshold === 'single') {
     const failedProjects = projects.filter(p => {
       const percentage = getProjectPercentage(p)
       return (
@@ -24,7 +24,7 @@ export function verifyCoverageThreshold(projects: CoveredProject[]): boolean {
       return false
     }
   }
-  if (Config.enforceCoverageThreshold === 'total') {
+  if (Config.enforceThreshold === 'total') {
     const percentage = getTotalPercentage(projects)
     if (
       percentage === undefined ||
