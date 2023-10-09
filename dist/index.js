@@ -5584,7 +5584,7 @@ const config_1 = __nccwpck_require__(6373);
 function buildMessage(projects) {
     let md = '';
     md += '# Coverage Report\n\n';
-    for (const project of projects) {
+    for (const project of projects.filter(p => p.coverage)) {
         md += buildTable(project) + '\n';
     }
     return md;
@@ -5620,15 +5620,15 @@ function buildHeader(project) {
     const badgeCell = percentage
         ? `<th>${buildBadgetableMd(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}</th>`
         : '<th>-</th>';
-    return `<table>\n
-    <tbody>\n
-        <tr>\n
-            <th>${project.name}</th>\n
-            ${percentageCell}\n
-            ${diffCell}\n
-            ${badgeCell}\n
-        </tr>\n
-    </tbody>\n
+    return `<table>
+    <tbody>
+        <tr>
+            <th>${project.name}</th>
+            ${percentageCell}
+            ${diffCell}
+            ${badgeCell}
+        </tr>
+    </tbody>
     </table>`;
 }
 function buildBody(project) {
@@ -5649,7 +5649,6 @@ function buildBody(project) {
     // Add all folders to the table
     for (const folder of Object.keys(folders).sort()) {
         tableMd += `| **${folder}** |   |   |\n`;
-        tableMd += '| --- | --- | --- |\n';
         for (const file of folders[folder]) {
             const name = file.file.split('/').slice(-1)[0];
             tableMd += `| ${name} | ${(0, lcov_1.getLcovPercentage)([file])} | ${file.lines.details.length} |\n`;
@@ -5658,8 +5657,9 @@ function buildBody(project) {
     }
     tableMd += '\n';
     return `<details>
-        <summary>Coverage Details</summary>\n
-        ${tableMd}\n</details>\n`;
+          <summary>Coverage Details</summary>
+          ${tableMd}
+        </details>`;
 }
 function getDiff(project) {
     if (project.coverageBefore === undefined || !project.coverage) {
