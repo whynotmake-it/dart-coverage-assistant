@@ -28,9 +28,9 @@ export async function run(): Promise<void> {
     const noDecreaseMet = verifyNoCoverageDecrease(coveredProjects)
 
     if (coverageThresholdMet && noDecreaseMet) {
-      core.setFailed('Configured conditions were not met.')
-    } else {
       core.setOutput('message', message)
+    } else {
+      core.setFailed('Configured conditions were not met.')
     }
   } catch (error) {
     // Fail the workflow run if an error occurs
