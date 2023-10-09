@@ -6,6 +6,7 @@ import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor'
 import { commitAndPushChanges, configureGit } from './git'
 import { generateBadges } from './badge'
 import { context } from '@actions/github'
+import { Config } from './config'
 
 /**
  * The main function for the action.
@@ -13,7 +14,6 @@ import { context } from '@actions/github'
  */
 export async function run(): Promise<void> {
   try {
-    core.info(`Configuring git...`)
     core.info(`Finding projects...`)
 
     const projects = await findProjects(null)
@@ -26,13 +26,10 @@ export async function run(): Promise<void> {
       `${coveredProjects.filter(p => p.coverage).length} projects covered.`
     )
 
-    // If we are in a PR
-    if (context.payload.pull_request) {
+    // If we are in a push event
+    if (Config.generateBadges && context.eventName === 'push') {
       try {
-        // Get ref of current branch
-        const ref = context.ref
-        core.info(`Setting up git with ${ref}...`)
-        await configureGit(ref)
+        await configureGit()
 
         core.info('Updating and pushing coverage badge...')
         await generateBadges(coveredProjects)

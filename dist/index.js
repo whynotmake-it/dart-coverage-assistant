@@ -13544,6 +13544,9 @@ class Config {
     static get enforceForbiddenDecrease() {
         return this.parseCoverageRule((0, core_1.getInput)('enforce_forbidden_decrease'));
     }
+    static get generateBadges() {
+        return (0, core_1.getInput)('generate_badges') === 'true';
+    }
     static parseCoverageRule(rule) {
         switch (rule) {
             case 'none':
@@ -13692,20 +13695,20 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.commitAndPushChanges = exports.configureGit = void 0;
 const exec = __importStar(__nccwpck_require__(1514));
-async function configureGit(ref) {
+async function configureGit() {
     await exec.exec('git', ['config', 'user.name', 'github-actions[bot]']);
     await exec.exec('git', [
         'config',
         'user.email',
         'github-actions[bot]@users.noreply.github.com'
     ]);
-    await exec.exec('git', ['checkout', ref]);
+    await exec.exec('git', ['checkout']);
 }
 exports.configureGit = configureGit;
 async function commitAndPushChanges(commitMessage) {
     await exec.exec('git', ['add', '.']);
     await exec.exec('git', ['commit', '-m', commitMessage]);
-    await exec.exec('git', ['push']);
+    await exec.exec('git', ['push', 'origin']);
 }
 exports.commitAndPushChanges = commitAndPushChanges;
 
@@ -13821,26 +13824,23 @@ const semaphor_1 = __nccwpck_require__(3624);
 const git_1 = __nccwpck_require__(6350);
 const badge_1 = __nccwpck_require__(3128);
 const github_1 = __nccwpck_require__(5438);
+const config_1 = __nccwpck_require__(6373);
 /**
  * The main function for the action.
  * @returns {Promise<string>} Returns the message that can be used as a code coverage report
  */
 async function run() {
     try {
-        core.info(`Configuring git...`);
         core.info(`Finding projects...`);
         const projects = await (0, finder_1.findProjects)(null);
         core.info(`Found ${projects.length} projects`);
         core.info(`Parsing coverage...`);
         const coveredProjects = await Promise.all(projects.map(lcov_1.coverProject));
         core.info(`${coveredProjects.filter(p => p.coverage).length} projects covered.`);
-        // If we are in a PR
-        if (github_1.context.payload.pull_request) {
+        // If we are in a push event
+        if (config_1.Config.generateBadges && github_1.context.eventName === 'push') {
             try {
-                // Get ref of current branch
-                const ref = github_1.context.ref;
-                core.info(`Setting up git with ${ref}...`);
-                await (0, git_1.configureGit)(ref);
+                await (0, git_1.configureGit)();
                 core.info('Updating and pushing coverage badge...');
                 await (0, badge_1.generateBadges)(coveredProjects);
                 await (0, git_1.commitAndPushChanges)('chore: coverage badges [skip ci]');

@@ -24,6 +24,10 @@ inputs:
     description: 'Whether the action should fail if the coverage decreases. Can be set to "none", "single", or "total". Defaults to "total".'
     default: "total"
     required: false
+  generate_badges:
+    description: "Whether to generate badges for the coverage on 'push' workflow triggers. Defaults to true."
+    default: "true"
+    required: false
 
 # Define your outputs here.
 outputs:

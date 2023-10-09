@@ -27,6 +27,10 @@ export class Config {
     return this.parseCoverageRule(getInput('enforce_forbidden_decrease'))
   }
 
+  static get generateBadges(): boolean {
+    return getInput('generate_badges') === 'true'
+  }
+
   private static parseCoverageRule(rule: string): CoverageRule {
     switch (rule) {
       case 'none':
