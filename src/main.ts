@@ -10,18 +10,18 @@ import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor'
  */
 export async function run(): Promise<void> {
   try {
-    core.debug(`Finding projects...`)
+    core.info(`Finding projects...`)
     const projects = await findProjects(null)
-    core.debug(`Found ${projects.length} projects`)
+    core.info(`Found ${projects.length} projects`)
 
-    core.debug(`Parsing coverage...`)
+    core.info(`Parsing coverage...`)
     const coveredProjects = await Promise.all(projects.map(coverProject))
 
-    core.debug(
+    core.info(
       `${coveredProjects.filter(p => p.coverage).length} projects covered.`
     )
 
-    core.debug(`Building message...`)
+    core.info(`Building message...`)
     const message = buildMessage(coveredProjects)
 
     const coverageThresholdMet = verifyCoverageThreshold(coveredProjects)

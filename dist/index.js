@@ -5544,13 +5544,13 @@ const semaphor_1 = __nccwpck_require__(3624);
  */
 async function run() {
     try {
-        core.debug(`Finding projects...`);
+        core.info(`Finding projects...`);
         const projects = await (0, finder_1.findProjects)(null);
-        core.debug(`Found ${projects.length} projects`);
-        core.debug(`Parsing coverage...`);
+        core.info(`Found ${projects.length} projects`);
+        core.info(`Parsing coverage...`);
         const coveredProjects = await Promise.all(projects.map(lcov_1.coverProject));
-        core.debug(`${coveredProjects.filter(p => p.coverage).length} projects covered.`);
-        core.debug(`Building message...`);
+        core.info(`${coveredProjects.filter(p => p.coverage).length} projects covered.`);
+        core.info(`Building message...`);
         const message = (0, message_1.buildMessage)(coveredProjects);
         const coverageThresholdMet = (0, semaphor_1.verifyCoverageThreshold)(coveredProjects);
         const noDecreaseMet = (0, semaphor_1.verifyNoCoverageDecrease)(coveredProjects);
@@ -5601,21 +5601,21 @@ function buildHeader(project) {
         ? (0, lcov_1.getProjectPercentage)(project)
         : undefined;
     const percentageCell = percentage
-        ? `<td>${percentage.toFixed(2)}%</td>`
-        : '<td>⚠️</td>';
+        ? `<th>${percentage.toFixed(2)}%</th>`
+        : '<th>⚠️</th>';
     const diff = getDiff(project);
     let diffCell;
     if (diff === undefined) {
-        diffCell = '<td>-</td>';
+        diffCell = '<th>-</th>';
     }
     else if (diff === 0) {
-        diffCell = `<td>➡️ ${diff.toFixed(2)}%</td>`;
+        diffCell = `<th>➡️ ${diff.toFixed(2)}%</th>`;
     }
     else if (diff > 0) {
-        diffCell = `<td>⬆️ +${diff.toFixed(2)}%</td>`;
+        diffCell = `<th>⬆️ +${diff.toFixed(2)}%</th>`;
     }
     else {
-        diffCell = `<td>⬇️ ${diff.toFixed(2)}%</td>`;
+        diffCell = `<th>⬇️ ${diff.toFixed(2)}%</th>`;
     }
     const badgeCell = percentage
         ? `<td>${buildBadgetableMd(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}</td>`
@@ -5623,7 +5623,7 @@ function buildHeader(project) {
     return `<table>\n
     <thead>\n
         <tr>\n
-            <th>${project.name}</th>\n
+            <th>${project.name}</td>\n
             ${percentageCell}\n
             ${diffCell}\n
             ${badgeCell}\n
@@ -5657,10 +5657,9 @@ function buildBody(project) {
         tableMd += '| --- | --- | --- |\n';
     }
     tableMd += '\n';
-    return `<details>\n
-        <summary>Coverage Details</summary>\n
-        \n
-        ${tableMd}\n
+    return `<details>
+        <summary>Coverage Details</summary>
+        ${tableMd}
     </details>`;
 }
 function getDiff(project) {
