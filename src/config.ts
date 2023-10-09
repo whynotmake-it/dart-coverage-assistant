@@ -8,26 +8,26 @@ export class Config {
   }
 
   static get upperCoverageThreshold(): number {
-    return parseFloat(getInput('upper_threshold', { required: true }))
+    return parseFloat(getInput('upper_threshold'))
   }
 
   static get lowerCoverageThreshold(): number {
-    return parseFloat(getInput('lower_threshold', { required: true }))
+    return parseFloat(getInput('lower_threshold'))
   }
 
   static get compareAgainstBase(): boolean {
-    return getInput('compare_against_base', { required: true }) === 'true'
+    return getInput('compare_against_base') === 'true'
   }
 
   static get enforceCoverageThreshold(): CoverageRule {
     return this.parseCoverageRule(
-      getInput('enforce_coverage_threshold', { required: true })
+      getInput('enforce_coverage_threshold')
     )
   }
 
   static get enforceForbiddenDecrease(): CoverageRule {
     return this.parseCoverageRule(
-      getInput('enforce_forbidden_decrease', { required: true })
+      getInput('enforce_forbidden_decrease')
     )
   }
 
