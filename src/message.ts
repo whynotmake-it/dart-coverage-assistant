@@ -38,18 +38,18 @@ function buildHeader(project: CoveredProject): string {
   }
 
   const badgeCell = percentage
-    ? `<td>${buildBadgetableMd(
-        project.name,
-        Config.upperCoverageThreshold,
-        Config.lowerCoverageThreshold,
-        percentage
-      )}</td>`
-    : '<td>-</td>'
+    ? `<th>${buildBadgetableMd(
+      project.name,
+      Config.upperCoverageThreshold,
+      Config.lowerCoverageThreshold,
+      percentage
+    )}</th>`
+    : '<th>-</th>'
 
   return `<table>\n
     <thead>\n
         <tr>\n
-            <th>${project.name}</td>\n
+            <th>${project.name}</th>\n
             ${percentageCell}\n
             ${diffCell}\n
             ${badgeCell}\n
@@ -81,9 +81,8 @@ function buildBody(project: CoveredProject): string {
     tableMd += '| --- | --- | --- |\n'
     for (const file of folders[folder]) {
       const name = file.file.split('/').slice(-1)[0]
-      tableMd += `| ${name} | ${getLcovPercentage([file])} | ${
-        file.lines.details.length
-      } |\n`
+      tableMd += `| ${name} | ${getLcovPercentage([file])} | ${file.lines.details.length
+        } |\n`
     }
     tableMd += '| --- | --- | --- |\n'
   }
@@ -91,9 +90,8 @@ function buildBody(project: CoveredProject): string {
   tableMd += '\n'
 
   return `<details>
-        <summary>Coverage Details</summary>
-        ${tableMd}
-    </details>`
+        <summary>Coverage Details</summary>\n
+        ${tableMd}\n</details>`
 }
 
 function getDiff(project: CoveredProject): number | undefined {
@@ -121,8 +119,8 @@ function buildBadgetableMd(
     percentage >= upper
       ? 'success'
       : percentage >= lower
-      ? 'important'
-      : 'critical'
+        ? 'important'
+        : 'critical'
   const url = `https://img.shields.io/badge/${name}-${percentageString}-${color}`
   return `![${alt}](${url} "${alt}")`
 }
