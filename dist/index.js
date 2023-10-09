@@ -13536,13 +13536,15 @@ class Config {
         return parseFloat((0, core_1.getInput)('lower_threshold'));
     }
     static get compareAgainstBase() {
-        return (0, core_1.getInput)('compare_against_base') === 'true';
+        //TODO
+        return false;
     }
     static get enforceThreshold() {
         return this.parseCoverageRule((0, core_1.getInput)('enforce_threshold'));
     }
     static get enforceForbiddenDecrease() {
-        return this.parseCoverageRule((0, core_1.getInput)('enforce_forbidden_decrease'));
+        //TODO
+        return 'none';
     }
     static get generateBadges() {
         return (0, core_1.getInput)('generate_badges') === 'true';
@@ -13550,6 +13552,7 @@ class Config {
     static parseCoverageRule(rule) {
         switch (rule) {
             case 'none':
+            case 'false':
                 return 'none';
             case 'single':
                 return 'single';

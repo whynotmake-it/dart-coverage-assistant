@@ -16,7 +16,8 @@ export class Config {
   }
 
   static get compareAgainstBase(): boolean {
-    return getInput('compare_against_base') === 'true'
+    //TODO
+    return false
   }
 
   static get enforceThreshold(): CoverageRule {
@@ -24,7 +25,8 @@ export class Config {
   }
 
   static get enforceForbiddenDecrease(): CoverageRule {
-    return this.parseCoverageRule(getInput('enforce_forbidden_decrease'))
+    //TODO
+    return 'none'
   }
 
   static get generateBadges(): boolean {
@@ -34,6 +36,7 @@ export class Config {
   private static parseCoverageRule(rule: string): CoverageRule {
     switch (rule) {
       case 'none':
+      case 'false':
         return 'none'
       case 'single':
         return 'single'
