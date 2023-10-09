@@ -22,40 +22,35 @@ function buildHeader(project: CoveredProject): string {
   const percentage = project.coverage
     ? getProjectPercentage(project)
     : undefined
-  const percentageCell = percentage
-    ? `<th>${percentage.toFixed(2)}%</th>`
-    : '<th>⚠️</th>'
+  const percentageCell = percentage ? `${percentage.toFixed(2)}%` : '⚠️'
   const diff = getDiff(project)
   let diffCell: string
   if (diff === undefined) {
-    diffCell = '<th>-</th>'
+    diffCell = '-'
   } else if (diff === 0) {
-    diffCell = `<th>➡️ ${diff.toFixed(2)}%</th>`
+    diffCell = `➡️ ${diff.toFixed(2)}%`
   } else if (diff > 0) {
-    diffCell = `<th>⬆️ +${diff.toFixed(2)}%</th>`
+    diffCell = `⬆️ +${diff.toFixed(2)}%`
   } else {
-    diffCell = `<th>⬇️ ${diff.toFixed(2)}%</th>`
+    diffCell = `⬇️ ${diff.toFixed(2)}%`
   }
 
   const badgeCell = percentage
-    ? `<th>${buildBadgetableMd(
+    ? `${buildBadgetableMd(
         project.name,
         Config.upperCoverageThreshold,
         Config.lowerCoverageThreshold,
         percentage
-      )}</th>`
-    : '<th>-</th>'
+      )}`
+    : ''
 
-  return `<table>
-    <tbody>
-        <tr>
-            <th>${project.name}</th>
-            ${percentageCell}
-            ${diffCell}
-            ${badgeCell}
-        </tr>
-    </tbody>
-    </table>`
+  return `## ${project.name} ${badgeCell}}
+      > ${project.description}
+
+      | Coverage | Diff |
+      | --- | --- |
+      | ${percentageCell} | ${diffCell} |
+  `
 }
 
 function buildBody(project: CoveredProject): string {
@@ -87,12 +82,13 @@ function buildBody(project: CoveredProject): string {
     tableMd += '| --- | --- | --- |\n'
   }
 
-  tableMd += '\n'
-
-  return `<details>
-          <summary>Coverage Details</summary>
-          ${tableMd}
-        </details>`
+  let md = '<details>\n'
+  md += `<summary>Coverage Details ${project.name}</summary>\n`
+  md += '\n'
+  md += tableMd
+  md += '\n'
+  md += '</details>'
+  return md
 }
 
 function getDiff(project: CoveredProject): number | undefined {
