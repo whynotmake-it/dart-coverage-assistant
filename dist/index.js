@@ -6924,9 +6924,14 @@ async function run() {
         core.info(`Parsing coverage...`);
         const coveredProjects = await Promise.all(projects.map(lcov_1.coverProject));
         core.info(`${coveredProjects.filter(p => p.coverage).length} projects covered.`);
-        core.info('Updating and pushing coverage badge...');
-        (0, badge_1.generateBadges)(coveredProjects);
-        (0, git_1.commitAndPushChanges)('chore: coverage badges [skip ci]');
+        try {
+            core.info('Updating and pushing coverage badge...');
+            await (0, badge_1.generateBadges)(coveredProjects);
+            (0, git_1.commitAndPushChanges)('chore: coverage badges [skip ci]');
+        }
+        catch (error) {
+            core.warning('Failed to commit and push coverage badge.');
+        }
         core.info(`Building message...`);
         const message = (0, message_1.buildMessage)(coveredProjects);
         const coverageThresholdMet = (0, semaphor_1.verifyCoverageThreshold)(coveredProjects);

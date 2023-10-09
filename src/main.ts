@@ -27,9 +27,13 @@ export async function run(): Promise<void> {
       `${coveredProjects.filter(p => p.coverage).length} projects covered.`
     )
 
-    core.info('Updating and pushing coverage badge...')
-    generateBadges(coveredProjects)
-    commitAndPushChanges('chore: coverage badges [skip ci]')
+    try {
+      core.info('Updating and pushing coverage badge...')
+      await generateBadges(coveredProjects)
+      commitAndPushChanges('chore: coverage badges [skip ci]')
+    } catch (error) {
+      core.warning('Failed to commit and push coverage badge.')
+    }
 
     core.info(`Building message...`)
     const message = buildMessage(coveredProjects)
