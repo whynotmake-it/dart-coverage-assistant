@@ -5593,6 +5593,7 @@ exports.buildMessage = buildMessage;
 function buildTable(project) {
     let md = '';
     md += buildHeader(project) + '\n';
+    md += '\n';
     md += buildBody(project) + '\n';
     return md;
 }
@@ -5618,13 +5619,14 @@ function buildHeader(project) {
     const badgeCell = percentage
         ? `${buildBadgetableMd(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}`
         : '';
-    return `## ${project.name} ${badgeCell}}
-      > ${project.description}
-
-      | Coverage | Diff |
-      | --- | --- |
-      | ${percentageCell} | ${diffCell} |
-  `;
+    let md = `## ${project.name} ${badgeCell}}\n`;
+    md += '\n';
+    md += `> ${project.description}\n`;
+    md += '\n';
+    md += '| Coverage | Diff |\n';
+    md += '| --- | --- |\n';
+    md += `| ${percentageCell} | ${diffCell} |\n`;
+    return md;
 }
 function buildBody(project) {
     if (project.coverage === undefined) {
@@ -5669,7 +5671,7 @@ function getDiff(project) {
     return current - before;
 }
 function buildBadgetableMd(name, upper, lower, percentage) {
-    const percentageString = percentage.toFixed(2) + '%';
+    const percentageString = percentage.toFixed(2) + '%25';
     const alt = percentage >= upper ? 'pass' : percentage >= lower ? 'warning' : 'fail';
     const color = percentage >= upper
         ? 'success'
@@ -5677,7 +5679,7 @@ function buildBadgetableMd(name, upper, lower, percentage) {
             ? 'important'
             : 'critical';
     const url = `https://img.shields.io/badge/${name}-${percentageString}-${color}`;
-    return `![${alt}](${url} "${alt}")`;
+    return `![${alt}](${encodeURI(url)} "${alt}")`;
 }
 
 

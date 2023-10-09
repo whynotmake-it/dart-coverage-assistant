@@ -14,6 +14,7 @@ export function buildMessage(projects: CoveredProject[]): string {
 function buildTable(project: CoveredProject): string {
   let md = ''
   md += buildHeader(project) + '\n'
+  md += '\n'
   md += buildBody(project) + '\n'
   return md
 }
@@ -44,13 +45,14 @@ function buildHeader(project: CoveredProject): string {
       )}`
     : ''
 
-  return `## ${project.name} ${badgeCell}}
-      > ${project.description}
-
-      | Coverage | Diff |
-      | --- | --- |
-      | ${percentageCell} | ${diffCell} |
-  `
+  let md = `## ${project.name} ${badgeCell}}\n`
+  md += '\n'
+  md += `> ${project.description}\n`
+  md += '\n'
+  md += '| Coverage | Diff |\n'
+  md += '| --- | --- |\n'
+  md += `| ${percentageCell} | ${diffCell} |\n`
+  return md
 }
 
 function buildBody(project: CoveredProject): string {
@@ -109,7 +111,7 @@ function buildBadgetableMd(
   lower: number,
   percentage: number
 ): string {
-  const percentageString = percentage.toFixed(2) + '%'
+  const percentageString = percentage.toFixed(2) + '%25'
   const alt =
     percentage >= upper ? 'pass' : percentage >= lower ? 'warning' : 'fail'
   const color =
@@ -119,5 +121,6 @@ function buildBadgetableMd(
       ? 'important'
       : 'critical'
   const url = `https://img.shields.io/badge/${name}-${percentageString}-${color}`
-  return `![${alt}](${url} "${alt}")`
+
+  return `![${alt}](${encodeURI(url)} "${alt}")`
 }
