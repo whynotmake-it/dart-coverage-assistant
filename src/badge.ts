@@ -69,8 +69,8 @@ export function buildBadgeUrl(
       : percentage >= lower
       ? 'important'
       : 'critical'
-  const firstHalf = encodeURI(name ? name + '-' : 'coverage')
-  const secondHalf = encodeURI(percentage.toFixed(2) + '%')
+  const firstHalf = name ? name + '-' : ''
+  const secondHalf = percentage.toFixed(2) + '%'
 
   return `https://img.shields.io/badge/${firstHalf}${secondHalf}-${color}`
 }
