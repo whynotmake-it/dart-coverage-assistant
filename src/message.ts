@@ -37,7 +37,7 @@ function buildHeader(project: CoveredProject): string {
   }
 
   const badgeCell = percentage
-    ? `${buildBadgetableMd(
+    ? `${buildBadge(
         project.name,
         Config.upperCoverageThreshold,
         Config.lowerCoverageThreshold,
@@ -105,7 +105,7 @@ function getDiff(project: CoveredProject): number | undefined {
   return current - before
 }
 
-function buildBadgetableMd(
+function buildBadge(
   name: string,
   upper: number,
   lower: number,

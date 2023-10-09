@@ -5617,7 +5617,7 @@ function buildHeader(project) {
         diffCell = `⬇️ ${diff.toFixed(2)}%`;
     }
     const badgeCell = percentage
-        ? `${buildBadgetableMd(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}`
+        ? `${buildBadge(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}`
         : '';
     let md = `## ${project.name} ${badgeCell}\n`;
     md += '\n';
@@ -5670,7 +5670,7 @@ function getDiff(project) {
         : (0, lcov_1.getLcovPercentage)(project.coverageBefore);
     return current - before;
 }
-function buildBadgetableMd(name, upper, lower, percentage) {
+function buildBadge(name, upper, lower, percentage) {
     const percentageString = percentage.toFixed(2) + '%';
     const alt = percentage >= upper ? 'pass' : percentage >= lower ? 'warning' : 'fail';
     const color = percentage >= upper
