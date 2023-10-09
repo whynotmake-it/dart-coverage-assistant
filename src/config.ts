@@ -20,15 +20,11 @@ export class Config {
   }
 
   static get enforceThreshold(): CoverageRule {
-    return this.parseCoverageRule(
-      getInput('enforce_threshold')
-    )
+    return this.parseCoverageRule(getInput('enforce_threshold'))
   }
 
   static get enforceForbiddenDecrease(): CoverageRule {
-    return this.parseCoverageRule(
-      getInput('enforce_forbidden_decrease')
-    )
+    return this.parseCoverageRule(getInput('enforce_forbidden_decrease'))
   }
 
   private static parseCoverageRule(rule: string): CoverageRule {

@@ -5312,19 +5312,19 @@ class Config {
         return (0, core_1.getInput)('GITHUB_TOKEN', { required: true });
     }
     static get upperCoverageThreshold() {
-        return parseFloat((0, core_1.getInput)('upper_threshold', { required: true }));
+        return parseFloat((0, core_1.getInput)('upper_threshold'));
     }
     static get lowerCoverageThreshold() {
-        return parseFloat((0, core_1.getInput)('lower_threshold', { required: true }));
+        return parseFloat((0, core_1.getInput)('lower_threshold'));
     }
     static get compareAgainstBase() {
-        return (0, core_1.getInput)('compare_against_base', { required: true }) === 'true';
+        return (0, core_1.getInput)('compare_against_base') === 'true';
     }
-    static get enforceCoverageThreshold() {
-        return this.parseCoverageRule((0, core_1.getInput)('enforce_coverage_threshold', { required: true }));
+    static get enforceThreshold() {
+        return this.parseCoverageRule((0, core_1.getInput)('enforce_threshold'));
     }
     static get enforceForbiddenDecrease() {
-        return this.parseCoverageRule((0, core_1.getInput)('enforce_forbidden_decrease', { required: true }));
+        return this.parseCoverageRule((0, core_1.getInput)('enforce_forbidden_decrease'));
     }
     static parseCoverageRule(rule) {
         switch (rule) {
@@ -5722,10 +5722,10 @@ const config_1 = __nccwpck_require__(6373);
 const lcov_1 = __nccwpck_require__(4888);
 const core = __importStar(__nccwpck_require__(2186));
 function verifyCoverageThreshold(projects) {
-    if (config_1.Config.enforceCoverageThreshold === 'none') {
+    if (config_1.Config.enforceThreshold === 'none') {
         return true;
     }
-    if (config_1.Config.enforceCoverageThreshold === 'single') {
+    if (config_1.Config.enforceThreshold === 'single') {
         const failedProjects = projects.filter(p => {
             const percentage = (0, lcov_1.getProjectPercentage)(p);
             return (percentage === undefined || percentage < config_1.Config.lowerCoverageThreshold);
@@ -5735,7 +5735,7 @@ function verifyCoverageThreshold(projects) {
             return false;
         }
     }
-    if (config_1.Config.enforceCoverageThreshold === 'total') {
+    if (config_1.Config.enforceThreshold === 'total') {
         const percentage = (0, lcov_1.getTotalPercentage)(projects);
         if (percentage === undefined ||
             percentage < config_1.Config.lowerCoverageThreshold) {
