@@ -1,18 +1,29 @@
-name: 'The name of your action here'
-description: 'Provide a description here'
-author: 'Your name or organization here'
+name: "Dart Coverage Assistant"
+description: "Magically generates code coverage for all your dart projects."
+author: "whynotmake.it"
 
 # Define your inputs here.
 inputs:
-  milliseconds:
-    description: 'Your input description here'
-    required: true
-    default: '1000'
+  lower_threshold:
+    description: "The lower threshold for code coverage, anything below this is considered a failure. Defaults to 100"
+    default: "100"
+  upper_threshold:
+    description: "The threshold for the coverage to be considered 'good', anything below this is considered critical. Defaults to 100"
+    default: "100"
+  compare_against_base:
+    description: "Whether to compare against the base when running in a PR. Defaults to true."
+    default: "true"
+  enforce_threshold:
+    description: 'Whether the action should fail if the coverage is below the lower threshold. Can be set to "none", "single", or "total". Defaults to "total".'
+    default: "total"
+  enforce_forbidden_decrease:
+    description: 'Whether the action should fail if the coverage decreases. Can be set to "none", "single", or "total". Defaults to "total".'
+    default: "total"
 
 # Define your outputs here.
 outputs:
-  time:
-    description: 'Your output description here'
+  message:
+    description: "The message to be used as sticky comment."
 
 runs:
   using: node20

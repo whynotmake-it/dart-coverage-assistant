@@ -1,24 +1,36 @@
 import * as core from '@actions/core'
-import { wait } from './wait'
+import { findProjects } from './finder'
+import { coverProject } from './lcov';
+import { buildMessage } from './message';
+import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor';
 
 /**
  * The main function for the action.
- * @returns {Promise<void>} Resolves when the action is complete.
+ * @returns {Promise<string>} Returns the message that can be used as a code coverage report
  */
 export async function run(): Promise<void> {
   try {
-    const ms: string = core.getInput('milliseconds')
 
-    // Debug logs are only output if the `ACTIONS_STEP_DEBUG` secret is true
-    core.debug(`Waiting ${ms} milliseconds ...`)
+    core.debug(`Finding projects...`)
+    const projects = await findProjects(null);
+    core.debug(`Found ${projects.length} projects`);
 
-    // Log the current timestamp, wait, then log the new timestamp
-    core.debug(new Date().toTimeString())
-    await wait(parseInt(ms, 10))
-    core.debug(new Date().toTimeString())
+    core.debug(`Parsing coverage...`)
+    const coveredProjects = await Promise.all(projects.map(coverProject));
 
-    // Set outputs for other workflow steps to use
-    core.setOutput('time', new Date().toTimeString())
+    core.debug(`${coveredProjects.filter((p) => p.coverage).length} projects covered.`);
+
+    core.debug(`Building message...`);
+    const message = buildMessage(coveredProjects);
+
+    const coverageThresholdMet = verifyCoverageThreshold(coveredProjects);
+    const noDecreaseMet = verifyNoCoverageDecrease(coveredProjects);
+
+    if (coverageThresholdMet && noDecreaseMet) {
+      core.setFailed('Configured conditions were not met.');
+    } else {
+      core.setOutput('message', message);
+    }
   } catch (error) {
     // Fail the workflow run if an error occurs
     if (error instanceof Error) core.setFailed(error.message)
