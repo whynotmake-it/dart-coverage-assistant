@@ -1,15 +1,14 @@
+import * as fs from 'fs'
 import { Config } from './config'
 import {
   CoveredProject,
   getProjectPercentage,
   getTotalPercentage
 } from './lcov'
-import * as fs from 'fs'
 
 export async function generateBadges(
   projects: CoveredProject[]
 ): Promise<void> {
-  const svgs: string[] = []
   for (const project of projects.filter(p => p.coverage)) {
     const percentage = getProjectPercentage(project)
     if (percentage === undefined) {

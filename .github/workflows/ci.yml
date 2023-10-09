@@ -53,7 +53,8 @@ jobs:
         id: test-action
         uses: ./
         with:
-          milliseconds: 1000
+          lower_threshold: 0
+          enforce_threshold: false
 
       - name: Print Output
         id: output
