@@ -20,7 +20,10 @@ export async function run(): Promise<void> {
     core.info(`Found ${projects.length} projects`)
 
     core.info(`Parsing coverage...`)
-    const coveredProjects = await Promise.all(projects.map(coverProject))
+    const projectsWithCoverage = await Promise.all(projects.map(coverProject))
+
+    /// Projects that actually have coverage
+    const coveredProjects = projectsWithCoverage.filter(p => p.coverage)
 
     core.info(
       `${coveredProjects.filter(p => p.coverage).length} projects covered.`
@@ -32,8 +35,9 @@ export async function run(): Promise<void> {
     // If we are in a Pull request and should generate badges
     if (Config.generateBadges && context.payload.pull_request) {
       try {
-        const branch = context.payload.pull_request.head.ref
+        const branch = context.payload.pull_request.ref
         core.info(`Checking out ${branch}...`)
+
         await checkout(branch)
         core.info('Updating and pushing coverage badge...')
         await generateBadges(coveredProjects)
