@@ -81,8 +81,10 @@ async function comment(body: string): Promise<void> {
       header
     )
     if (previous) {
+      core.info(`Updating previous comment #${previous.id}`)
       await updateComment(octokit, previous.id, body, header)
     } else {
+      core.info(`Writing a new comment`)
       await createComment(
         octokit,
         context.repo,

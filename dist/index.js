@@ -18304,9 +18304,11 @@ async function comment(body) {
     if (github_1.context.payload.pull_request) {
         const previous = await (0, comment_1.findPreviousComment)(octokit, github_1.context.repo, github_1.context.payload.pull_request?.number, header);
         if (previous) {
+            core.info(`Updating previous comment #${previous.id}`);
             await (0, comment_1.updateComment)(octokit, previous.id, body, header);
         }
         else {
+            core.info(`Writing a new comment`);
             await (0, comment_1.createComment)(octokit, github_1.context.repo, github_1.context.payload.pull_request?.number, body, header);
         }
     }
