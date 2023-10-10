@@ -23,7 +23,7 @@ export async function generateBadges(
 
     const path = project.pubspecFile.split('/').slice(0, -1).join('/')
     // write svg to file
-    fs.writeFileSync(`${path}/coverage-badge.svg`, svg)
+    fs.writeFileSync(`${path}/coverage.svg`, svg)
   }
   const totalPercentageg = getTotalPercentage(projects)
   if (totalPercentageg === undefined) {
@@ -35,7 +35,7 @@ export async function generateBadges(
     Config.lowerCoverageThreshold,
     totalPercentageg
   )
-  fs.writeFileSync(`./coverage-badge-total.svg`, svg)
+  fs.writeFileSync(`./coverage-total.svg`, svg)
 }
 
 async function buildSvg(
