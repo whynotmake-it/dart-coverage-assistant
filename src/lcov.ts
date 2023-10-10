@@ -98,3 +98,16 @@ export function getTotalPercentage(
   }
   return coverages.reduce((a, b) => a + b) / coverages.length
 }
+
+export function getTotalPercentageBefore(
+  projects: CoveredProject[]
+): number | undefined {
+  const coverages = projects
+    .map(p => p.coverageBefore)
+    .filter(c => c !== undefined && c !== null)
+    .map(a => getLcovPercentage(a!))
+  if (coverages.length === 0) {
+    return undefined
+  }
+  return coverages.reduce((a, b) => a + b) / coverages.length
+}

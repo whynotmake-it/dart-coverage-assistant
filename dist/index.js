@@ -18142,7 +18142,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getTotalPercentage = exports.getProjectPercentage = exports.getLcovPercentage = exports.parseLcovBefore = exports.coverProject = void 0;
+exports.getTotalPercentageBefore = exports.getTotalPercentage = exports.getProjectPercentage = exports.getLcovPercentage = exports.parseLcovBefore = exports.coverProject = void 0;
 const lcov_parse_1 = __importDefault(__nccwpck_require__(7454));
 /**
  * Converts a project into a CoveredProject object by attempting to parse the coverage file
@@ -18213,6 +18213,17 @@ function getTotalPercentage(projects) {
     return coverages.reduce((a, b) => a + b) / coverages.length;
 }
 exports.getTotalPercentage = getTotalPercentage;
+function getTotalPercentageBefore(projects) {
+    const coverages = projects
+        .map(p => p.coverageBefore)
+        .filter(c => c !== undefined && c !== null)
+        .map(a => getLcovPercentage(a));
+    if (coverages.length === 0) {
+        return undefined;
+    }
+    return coverages.reduce((a, b) => a + b) / coverages.length;
+}
+exports.getTotalPercentageBefore = getTotalPercentageBefore;
 
 
 /***/ }),
@@ -18293,17 +18304,20 @@ async function run() {
                 core.warning(`Failed to commit and push coverage badge due to ${error}.`);
             }
         }
-        core.info(`Building message...`);
-        const message = (0, message_1.buildMessage)(coveredProjects);
+        const pr = github_1.context.payload.pull_request;
+        if (pr) {
+            core.info(`Building message...`);
+            const message = (0, message_1.buildMessage)(coveredProjects, pr.html_url ?? '', pr.head.sha);
+            core.setOutput('message', message);
+            try {
+                await comment(message);
+            }
+            catch (error) {
+                core.warning(`Failed to comment due to ${error}.`);
+            }
+        }
         const coverageThresholdMet = (0, semaphor_1.verifyCoverageThreshold)(coveredProjects);
         const noDecreaseMet = (0, semaphor_1.verifyNoCoverageDecrease)(coveredProjects);
-        core.setOutput('message', message);
-        try {
-            await comment(message);
-        }
-        catch (error) {
-            core.warning(`Failed to comment due to ${error}.`);
-        }
         if (!coverageThresholdMet || !noDecreaseMet) {
             core.setFailed('Configured conditions were not met.');
         }
@@ -18347,18 +18361,18 @@ exports.buildMessage = void 0;
 const lcov_1 = __nccwpck_require__(4888);
 const config_1 = __nccwpck_require__(6373);
 const badge_1 = __nccwpck_require__(3128);
-function buildMessage(projects) {
+function buildMessage(projects, url, sha) {
     if (projects.length === 0) {
         return '';
     }
+    const shaShort = sha.slice(0, 8);
+    const commit = `[<code>${shaShort}</code>](${url}/commits/${sha})`;
     let md = '';
     md += '# Coverage Report\n';
-    md += `Coverage for ${projects.length} projects\n`;
-    const combined = (0, lcov_1.getTotalPercentage)(projects);
-    if (combined !== undefined) {
-        const badge = buildBadge(config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, combined);
-        md += `Total repository coverage: ${badge}\n`;
-        md += '\n';
+    md += `Automatic coverage report for ${commit}.\n`;
+    md += '\n';
+    if (projects.length > 1) {
+        md += buildTotalTable(projects) + '\n';
     }
     for (const project of projects) {
         md += buildTable(project) + '\n';
@@ -18369,6 +18383,19 @@ function buildMessage(projects) {
     return md;
 }
 exports.buildMessage = buildMessage;
+function buildTotalTable(projects) {
+    let md = '';
+    const combined = (0, lcov_1.getTotalPercentage)(projects);
+    if (combined !== undefined) {
+        const badge = buildBadge(config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, combined);
+        md += `## Total coverage: \n`;
+        md += '\n';
+        md += `| Coverage | Diff |\n`;
+        md += `| --- | --- |\n`;
+        md += `| ${badge} | ${buildDiffString(getTotalDiff(projects))} |\n`;
+    }
+    return md;
+}
 function buildTable(project) {
     let md = '';
     md += buildHeader(project) + '\n';
@@ -18380,31 +18407,17 @@ function buildHeader(project) {
     const percentage = project.coverage
         ? (0, lcov_1.getProjectPercentage)(project)
         : undefined;
-    const percentageCell = percentage ? `${percentage.toFixed(2)}%` : '⚠️';
-    const diff = getDiff(project);
-    let diffCell;
-    if (diff === undefined) {
-        diffCell = '-';
-    }
-    else if (diff === 0) {
-        diffCell = `➡️ ${diff.toFixed(2)}%`;
-    }
-    else if (diff > 0) {
-        diffCell = `⬆️ +${diff.toFixed(2)}%`;
-    }
-    else {
-        diffCell = `⬇️ ${diff.toFixed(2)}%`;
-    }
+    const diff = buildDiffString(getDiff(project));
     const badgeCell = percentage
         ? `${buildBadge(config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}`
         : '';
-    let md = `## ${project.name} ${badgeCell}\n`;
+    let md = `## ${project.name}\n`;
     md += '\n';
     md += `> ${project.description}\n`;
     md += '\n';
     md += '| Coverage | Diff |\n';
     md += '| --- | --- |\n';
-    md += `| ${percentageCell} | ${diffCell} |\n`;
+    md += `| ${badgeCell} | ${diff} |\n`;
     return md;
 }
 function buildBody(project) {
@@ -18438,6 +18451,20 @@ function buildBody(project) {
     md += '</details>';
     return md;
 }
+function buildDiffString(diff) {
+    if (diff === undefined) {
+        return '-';
+    }
+    if (diff === 0) {
+        return `➡️ ${diff.toFixed(2)}%`;
+    }
+    else if (diff > 0) {
+        return `⬆️ +${diff.toFixed(2)}%`;
+    }
+    else {
+        return `⬇️ ${diff.toFixed(2)}%`;
+    }
+}
 function getDiff(project) {
     if (project.coverageBefore === undefined || !project.coverage) {
         return undefined;
@@ -18446,6 +18473,14 @@ function getDiff(project) {
     const before = project.coverageBefore === null
         ? 0
         : (0, lcov_1.getLcovPercentage)(project.coverageBefore);
+    return current - before;
+}
+function getTotalDiff(projects) {
+    const current = (0, lcov_1.getTotalPercentage)(projects);
+    const before = (0, lcov_1.getTotalPercentageBefore)(projects);
+    if (current === undefined || before === undefined) {
+        return undefined;
+    }
     return current - before;
 }
 function buildBadge(upper, lower, percentage) {

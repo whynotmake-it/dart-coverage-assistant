@@ -57,19 +57,25 @@ export async function run(): Promise<void> {
       }
     }
 
-    core.info(`Building message...`)
-    const message = buildMessage(coveredProjects)
+    const pr = context.payload.pull_request
+    if (pr) {
+      core.info(`Building message...`)
+      const message = buildMessage(
+        coveredProjects,
+        pr.html_url ?? '',
+        pr.head.sha
+      )
+
+      core.setOutput('message', message)
+      try {
+        await comment(message)
+      } catch (error) {
+        core.warning(`Failed to comment due to ${error}.`)
+      }
+    }
 
     const coverageThresholdMet = verifyCoverageThreshold(coveredProjects)
     const noDecreaseMet = verifyNoCoverageDecrease(coveredProjects)
-
-    core.setOutput('message', message)
-    try {
-      await comment(message)
-    } catch (error) {
-      core.warning(`Failed to comment due to ${error}.`)
-    }
-
     if (!coverageThresholdMet || !noDecreaseMet) {
       core.setFailed('Configured conditions were not met.')
     }
