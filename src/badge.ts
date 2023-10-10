@@ -63,12 +63,14 @@ export function buildBadgeUrl(
   lower: number,
   percentage: number
 ): string {
-  const color =
-    percentage >= upper
-      ? 'success'
-      : percentage >= lower
-      ? 'important'
-      : 'critical'
+  let color = ''
+  if (percentage >= upper) {
+    color = 'success'
+  } else if (percentage >= lower) {
+    color = 'important'
+  } else {
+    color = 'critical'
+  }
   const firstHalf = name ? name + '-' : ''
   const secondHalf = percentage.toFixed(2) + '%'
 

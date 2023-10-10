@@ -7,8 +7,11 @@ export async function configureGit(): Promise<void> {
     'user.email',
     'github-actions[bot]@users.noreply.github.com'
   ])
+}
 
-  await exec.exec('git', ['checkout'])
+export async function checkout(branch: string): Promise<void> {
+  // Checkout the branch while keeping local changes
+  await exec.exec('git', ['checkout', branch, '--'])
 }
 
 export async function commitAndPushChanges(
