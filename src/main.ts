@@ -8,7 +8,6 @@ import { checkoutRef, commitAndPushChanges, configureGit } from './git'
 import { coverProject, parseLcovBefore } from './lcov'
 import { buildMessage } from './message'
 import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor'
-import { parse } from 'path'
 
 /**
  * The main function for the action.
