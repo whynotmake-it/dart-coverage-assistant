@@ -18265,7 +18265,7 @@ async function run() {
             try {
                 core.info(`Configuring git...`);
                 await (0, git_1.configureGit)();
-                const branch = github_1.context.payload.pull_request.ref;
+                const branch = github_1.context.ref;
                 core.info(`Checking out ${branch}...`);
                 await (0, git_1.checkout)(branch);
                 core.info('Updating and pushing coverage badge...');

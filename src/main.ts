@@ -8,6 +8,7 @@ import { generateBadges } from './badge'
 import { context, getOctokit } from '@actions/github'
 import { Config } from './config'
 import { findPreviousComment, createComment, updateComment } from './comment'
+import { GitHub } from '@actions/github/lib/utils'
 
 /**
  * The main function for the action.
@@ -34,7 +35,7 @@ export async function run(): Promise<void> {
       try {
         core.info(`Configuring git...`)
         await configureGit()
-        const branch = context.payload.pull_request.ref
+        const branch = context.ref
         core.info(`Checking out ${branch}...`)
 
         await checkout(branch)
