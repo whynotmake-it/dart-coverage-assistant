@@ -19,7 +19,7 @@ export async function checkout(ref: string): Promise<void> {
   // Checkout the branch while keeping local changes
   await exec.exec('git', ['branch', '-a'], { outStream: process.stdout })
   await exec.exec('git', ['stash'])
-  await exec.exec('git', ['checkout', `"${ref}"`])
+  await exec.exec('git', ['checkout', '-b', ref, `origin/${ref}`])
   await exec.exec('git', ['stash', 'pop'])
 }
 
