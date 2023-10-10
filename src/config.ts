@@ -28,8 +28,7 @@ export class Config {
   }
 
   static get enforceForbiddenDecrease(): CoverageRule {
-    //TODO
-    return 'none'
+    return this.parseCoverageRule(getInput('enforce_forbidden_decrease'))
   }
 
   static get generateBadges(): boolean {

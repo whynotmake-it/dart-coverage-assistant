@@ -20,10 +20,10 @@ inputs:
     description: 'Whether the action should fail if the coverage is below the lower threshold. Can be set to "none", "single", or "total". Defaults to "total".'
     default: "total"
     required: false
-  # enforce_forbidden_decrease:
-  #   description: 'Whether the action should fail if the coverage decreases. Can be set to "none", "single", or "total". Defaults to "total".'
-  #   default: "total"
-  #   required: false
+  enforce_forbidden_decrease:
+    description: 'Whether the action should fail if the coverage decreases. Can be set to "none", "single", or "total". Defaults to "total".'
+    default: "total"
+    required: false
   generate_badges:
     description: "Whether to generate badges for the coverage on 'push' workflow triggers. Defaults to true."
     default: "true"

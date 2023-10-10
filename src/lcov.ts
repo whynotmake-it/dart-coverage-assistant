@@ -87,6 +87,18 @@ export function getProjectPercentage(
   return getLcovPercentage(project.coverage)
 }
 
+export function getProjectPercentageBefore(
+  project: CoveredProject
+): number | undefined {
+  if (project.coverageBefore === undefined) {
+    return undefined
+  }
+  if (project.coverageBefore === null) {
+    return 0
+  }
+  return getLcovPercentage(project.coverageBefore)
+}
+
 export function getTotalPercentage(
   projects: CoveredProject[]
 ): number | undefined {

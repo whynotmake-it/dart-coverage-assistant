@@ -17948,8 +17948,7 @@ class Config {
         return this.parseCoverageRule((0, core_1.getInput)('enforce_threshold'));
     }
     static get enforceForbiddenDecrease() {
-        //TODO
-        return 'none';
+        return this.parseCoverageRule((0, core_1.getInput)('enforce_forbidden_decrease'));
     }
     static get generateBadges() {
         return (0, core_1.getInput)('generate_badges') === 'true';
@@ -18142,7 +18141,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getTotalPercentageBefore = exports.getTotalPercentage = exports.getProjectPercentage = exports.getLcovPercentage = exports.parseLcovBefore = exports.coverProject = void 0;
+exports.getTotalPercentageBefore = exports.getTotalPercentage = exports.getProjectPercentageBefore = exports.getProjectPercentage = exports.getLcovPercentage = exports.parseLcovBefore = exports.coverProject = void 0;
 const lcov_parse_1 = __importDefault(__nccwpck_require__(7454));
 /**
  * Converts a project into a CoveredProject object by attempting to parse the coverage file
@@ -18203,6 +18202,16 @@ function getProjectPercentage(project) {
     return getLcovPercentage(project.coverage);
 }
 exports.getProjectPercentage = getProjectPercentage;
+function getProjectPercentageBefore(project) {
+    if (project.coverageBefore === undefined) {
+        return undefined;
+    }
+    if (project.coverageBefore === null) {
+        return 0;
+    }
+    return getLcovPercentage(project.coverageBefore);
+}
+exports.getProjectPercentageBefore = getProjectPercentageBefore;
 function getTotalPercentage(projects) {
     const coverages = projects
         .map(getProjectPercentage)
@@ -18411,7 +18420,7 @@ function buildHeader(project) {
     const badgeCell = percentage
         ? `${buildBadge(config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}`
         : '';
-    let md = `## ${project.name}\n`;
+    let md = `## \`${project.name}\`\n`;
     md += '\n';
     md += `> ${project.description}\n`;
     md += '\n';
@@ -18529,7 +18538,7 @@ function verifyCoverageThreshold(projects) {
     if (config_1.Config.enforceThreshold === 'none') {
         return true;
     }
-    if (config_1.Config.enforceThreshold === 'single') {
+    else if (config_1.Config.enforceThreshold === 'single') {
         const failedProjects = projects.filter(p => {
             const percentage = (0, lcov_1.getProjectPercentage)(p);
             return (percentage === undefined || percentage < config_1.Config.lowerCoverageThreshold);
@@ -18539,7 +18548,7 @@ function verifyCoverageThreshold(projects) {
             return false;
         }
     }
-    if (config_1.Config.enforceThreshold === 'total') {
+    else if (config_1.Config.enforceThreshold === 'total') {
         const percentage = (0, lcov_1.getTotalPercentage)(projects);
         if (percentage === undefined ||
             percentage < config_1.Config.lowerCoverageThreshold) {
@@ -18551,10 +18560,30 @@ function verifyCoverageThreshold(projects) {
 }
 exports.verifyCoverageThreshold = verifyCoverageThreshold;
 function verifyNoCoverageDecrease(projects) {
-    // TODO
     projects;
     if (config_1.Config.enforceForbiddenDecrease === 'none') {
         return true;
+    }
+    else if (config_1.Config.enforceForbiddenDecrease === 'single') {
+        const failed = projects.filter(p => {
+            const percentage = (0, lcov_1.getProjectPercentage)(p);
+            const before = (0, lcov_1.getProjectPercentageBefore)(p);
+            return (percentage !== undefined && before !== undefined && percentage < before);
+        });
+        if (failed.length) {
+            core.error(`Coverage decrease detected for ${failed.length} projects`);
+            return false;
+        }
+    }
+    else if (config_1.Config.enforceForbiddenDecrease === 'total') {
+        const total = (0, lcov_1.getTotalPercentage)(projects);
+        const totalBefore = (0, lcov_1.getTotalPercentageBefore)(projects);
+        if (total !== undefined &&
+            totalBefore !== undefined &&
+            total < totalBefore) {
+            core.error(`Total coverage decreased by ${(totalBefore - total).toFixed(2)}%`);
+            return false;
+        }
     }
     return true;
 }

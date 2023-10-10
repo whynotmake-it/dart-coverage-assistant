@@ -77,7 +77,7 @@ function buildHeader(project: CoveredProject): string {
       )}`
     : ''
 
-  let md = `## ${project.name}\n`
+  let md = `## \`${project.name}\`\n`
   md += '\n'
   md += `> ${project.description}\n`
   md += '\n'
