@@ -17942,8 +17942,7 @@ class Config {
         return parseFloat((0, core_1.getInput)('lower_threshold'));
     }
     static get compareAgainstBase() {
-        //TODO
-        return false;
+        return (0, core_1.getInput)('compare_against_base') === 'true';
     }
     static get enforceThreshold() {
         return this.parseCoverageRule((0, core_1.getInput)('enforce_threshold'));

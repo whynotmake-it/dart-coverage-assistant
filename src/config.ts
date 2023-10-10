@@ -20,8 +20,7 @@ export class Config {
   }
 
   static get compareAgainstBase(): boolean {
-    //TODO
-    return false
+    return getInput('compare_against_base') === 'true'
   }
 
   static get enforceThreshold(): CoverageRule {
