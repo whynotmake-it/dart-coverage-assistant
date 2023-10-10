@@ -32,6 +32,10 @@ inputs:
     description: "The GitHub access token (e.g. secrets.GITHUB_TOKEN) used to create or update the comment. This defaults to {{ github.token }}."
     default: "${{ github.token }}"
     required: false
+  GITHUB_HEAD_REF:
+    description: "The branch or tag ref that is being merged into the base branch or tag. This defaults to {{ github.head_ref }}."
+    default: "${{ github.head_ref }}"
+    required: false
 
 # Define your outputs here.
 outputs:

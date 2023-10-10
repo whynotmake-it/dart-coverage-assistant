@@ -7,6 +7,10 @@ export class Config {
     return getInput('GITHUB_TOKEN', { required: true })
   }
 
+  static get githubHeadRef(): string {
+    return getInput('GITHUB_HEAD_REF', { required: true })
+  }
+
   static get upperCoverageThreshold(): number {
     return parseFloat(getInput('upper_threshold'))
   }

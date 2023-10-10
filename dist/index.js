@@ -17932,6 +17932,9 @@ class Config {
     static get githubToken() {
         return (0, core_1.getInput)('GITHUB_TOKEN', { required: true });
     }
+    static get githubHeadRef() {
+        return (0, core_1.getInput)('GITHUB_HEAD_REF', { required: true });
+    }
     static get upperCoverageThreshold() {
         return parseFloat((0, core_1.getInput)('upper_threshold'));
     }
@@ -18101,6 +18104,9 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.commitAndPushChanges = exports.checkout = exports.configureGit = void 0;
 const exec = __importStar(__nccwpck_require__(1514));
+const github_1 = __nccwpck_require__(5438);
+const config_1 = __nccwpck_require__(6373);
+const console_1 = __nccwpck_require__(206);
 async function configureGit() {
     await exec.exec('git', ['config', 'user.name', 'github-actions[bot]']);
     await exec.exec('git', [
@@ -18108,30 +18114,28 @@ async function configureGit() {
         'user.email',
         'github-actions[bot]@users.noreply.github.com'
     ]);
+    const url = `https://x-access-token:${config_1.Config.githubToken}@github.com/${github_1.context.payload.repository?.full_name}`;
+    (0, console_1.info)(`url: ${url}`);
+    await exec.exec('git', ['remote', 'set-url', 'origin', url]);
 }
 exports.configureGit = configureGit;
-async function checkout(ref) {
+async function checkout() {
     // Checkout the branch while keeping local changes
     await exec.exec('git', ['branch', '-a'], { outStream: process.stdout });
-    try {
-        await exec.exec('git', ['stash']);
-    }
-    catch (error) {
-        // No local changes to stash
-    }
-    await exec.exec('git', ['checkout', `${ref.replace('refs/', 'remotes/')}`]);
+    await exec.exec('git', ['stash']);
+    await exec.exec('git', ['checkout', config_1.Config.githubHeadRef]);
     try {
         await exec.exec('git', ['stash', 'pop']);
     }
     catch (error) {
-        // No stash to pop
+        // No stash to pop is fine
     }
 }
 exports.checkout = checkout;
 async function commitAndPushChanges(commitMessage) {
     await exec.exec('git', ['add', '.']);
     await exec.exec('git', ['commit', '-am', commitMessage]);
-    await exec.exec('git', ['push']);
+    await exec.exec('git', ['push', 'origin']);
 }
 exports.commitAndPushChanges = commitAndPushChanges;
 
@@ -18539,6 +18543,14 @@ module.exports = require("buffer");
 
 "use strict";
 module.exports = require("child_process");
+
+/***/ }),
+
+/***/ 206:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("console");
 
 /***/ }),
 
