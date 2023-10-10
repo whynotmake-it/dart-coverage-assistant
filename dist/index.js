@@ -18102,7 +18102,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.commitAndPushChanges = exports.checkout = exports.configureGit = void 0;
+exports.commitAndPushChanges = exports.configureGit = void 0;
 const exec = __importStar(__nccwpck_require__(1514));
 const github_1 = __nccwpck_require__(5438);
 const config_1 = __nccwpck_require__(6373);
@@ -18119,19 +18119,6 @@ async function configureGit() {
     await exec.exec('git', ['remote', 'set-url', 'origin', url]);
 }
 exports.configureGit = configureGit;
-async function checkout() {
-    // Checkout the branch while keeping local changes
-    await exec.exec('git', ['branch', '-a'], { outStream: process.stdout });
-    await exec.exec('git', ['stash']);
-    await exec.exec('git', ['checkout', config_1.Config.githubHeadRef]);
-    try {
-        await exec.exec('git', ['stash', 'pop']);
-    }
-    catch (error) {
-        // No stash to pop is fine
-    }
-}
-exports.checkout = checkout;
 async function commitAndPushChanges(commitMessage) {
     await exec.exec('git', ['add', '.']);
     await exec.exec('git', ['commit', '-am', commitMessage]);
@@ -18244,15 +18231,15 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = void 0;
 const core = __importStar(__nccwpck_require__(2186));
+const github_1 = __nccwpck_require__(5438);
+const badge_1 = __nccwpck_require__(3128);
+const comment_1 = __nccwpck_require__(7810);
+const config_1 = __nccwpck_require__(6373);
 const finder_1 = __nccwpck_require__(6932);
+const git_1 = __nccwpck_require__(6350);
 const lcov_1 = __nccwpck_require__(4888);
 const message_1 = __nccwpck_require__(7899);
 const semaphor_1 = __nccwpck_require__(3624);
-const git_1 = __nccwpck_require__(6350);
-const badge_1 = __nccwpck_require__(3128);
-const github_1 = __nccwpck_require__(5438);
-const config_1 = __nccwpck_require__(6373);
-const comment_1 = __nccwpck_require__(7810);
 /**
  * The main function for the action.
  */
@@ -18266,12 +18253,11 @@ async function run() {
         /// Projects that actually have coverage
         const coveredProjects = projectsWithCoverage.filter(p => p.coverage?.length);
         core.info(`${coveredProjects.filter(p => p.coverage).length} projects covered.`);
-        // If we are in a Pull request and should generate badges
-        if (config_1.Config.generateBadges && github_1.context.payload.pull_request) {
+        // If we are in a Push event and generateBadges is true, generate badges
+        if (config_1.Config.generateBadges && github_1.context.eventName === 'push') {
             try {
                 core.info(`Configuring git...`);
                 await (0, git_1.configureGit)();
-                await (0, git_1.checkout)();
                 core.info('Updating and pushing coverage badge...');
                 await (0, badge_1.generateBadges)(coveredProjects);
                 await (0, git_1.commitAndPushChanges)('chore: coverage badges [skip ci]');
@@ -18315,6 +18301,9 @@ async function comment(body) {
             core.info(`Writing a new comment`);
             await (0, comment_1.createComment)(octokit, github_1.context.repo, github_1.context.payload.pull_request?.number, body, header);
         }
+    }
+    else {
+        core.info(`Not a pull request, skipping comment`);
     }
 }
 

@@ -1,13 +1,13 @@
 import * as core from '@actions/core'
+import { context, getOctokit } from '@actions/github'
+import { generateBadges } from './badge'
+import { createComment, findPreviousComment, updateComment } from './comment'
+import { Config } from './config'
 import { findProjects } from './finder'
+import { commitAndPushChanges, configureGit } from './git'
 import { coverProject } from './lcov'
 import { buildMessage } from './message'
 import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor'
-import { checkout, commitAndPushChanges, configureGit } from './git'
-import { generateBadges } from './badge'
-import { context, getOctokit } from '@actions/github'
-import { Config } from './config'
-import { findPreviousComment, createComment, updateComment } from './comment'
 
 /**
  * The main function for the action.
@@ -29,13 +29,12 @@ export async function run(): Promise<void> {
       `${coveredProjects.filter(p => p.coverage).length} projects covered.`
     )
 
-    // If we are in a Pull request and should generate badges
-    if (Config.generateBadges && context.payload.pull_request) {
+    // If we are in a Push event and generateBadges is true, generate badges
+    if (Config.generateBadges && context.eventName === 'push') {
       try {
         core.info(`Configuring git...`)
         await configureGit()
 
-        await checkout()
         core.info('Updating and pushing coverage badge...')
         await generateBadges(coveredProjects)
         await commitAndPushChanges('chore: coverage badges [skip ci]')
@@ -91,5 +90,7 @@ async function comment(body: string): Promise<void> {
         header
       )
     }
+  } else {
+    core.info(`Not a pull request, skipping comment`)
   }
 }

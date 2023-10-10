@@ -15,18 +15,6 @@ export async function configureGit(): Promise<void> {
   await exec.exec('git', ['remote', 'set-url', 'origin', url])
 }
 
-export async function checkout(): Promise<void> {
-  // Checkout the branch while keeping local changes
-  await exec.exec('git', ['branch', '-a'], { outStream: process.stdout })
-  await exec.exec('git', ['stash'])
-  await exec.exec('git', ['checkout', Config.githubHeadRef])
-  try {
-    await exec.exec('git', ['stash', 'pop'])
-  } catch (error) {
-    // No stash to pop is fine
-  }
-}
-
 export async function commitAndPushChanges(
   commitMessage: string
 ): Promise<void> {
