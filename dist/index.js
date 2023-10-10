@@ -18271,9 +18271,7 @@ async function run() {
             try {
                 core.info(`Configuring git...`);
                 await (0, git_1.configureGit)();
-                const branch = github_1.context.ref;
-                core.info(`Checking out ${branch}...`);
-                // await checkout(branch)
+                await (0, git_1.checkout)();
                 core.info('Updating and pushing coverage badge...');
                 await (0, badge_1.generateBadges)(coveredProjects);
                 await (0, git_1.commitAndPushChanges)('chore: coverage badges [skip ci]');

@@ -3,7 +3,7 @@ import { findProjects } from './finder'
 import { coverProject } from './lcov'
 import { buildMessage } from './message'
 import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor'
-import { commitAndPushChanges, configureGit } from './git'
+import { checkout, commitAndPushChanges, configureGit } from './git'
 import { generateBadges } from './badge'
 import { context, getOctokit } from '@actions/github'
 import { Config } from './config'
@@ -34,10 +34,8 @@ export async function run(): Promise<void> {
       try {
         core.info(`Configuring git...`)
         await configureGit()
-        const branch = context.ref
-        core.info(`Checking out ${branch}...`)
 
-        // await checkout(branch)
+        await checkout()
         core.info('Updating and pushing coverage badge...')
         await generateBadges(coveredProjects)
         await commitAndPushChanges('chore: coverage badges [skip ci]')
