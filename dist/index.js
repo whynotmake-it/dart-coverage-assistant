@@ -18131,7 +18131,7 @@ exports.checkout = checkout;
 async function commitAndPushChanges(commitMessage) {
     await exec.exec('git', ['add', '.']);
     await exec.exec('git', ['commit', '-am', commitMessage]);
-    await exec.exec('git', ['push', 'origin']);
+    await exec.exec('git', ['push']);
 }
 exports.commitAndPushChanges = commitAndPushChanges;
 
@@ -18269,7 +18269,7 @@ async function run() {
                 await (0, git_1.configureGit)();
                 const branch = github_1.context.ref;
                 core.info(`Checking out ${branch}...`);
-                await (0, git_1.checkout)(branch);
+                // await checkout(branch)
                 core.info('Updating and pushing coverage badge...');
                 await (0, badge_1.generateBadges)(coveredProjects);
                 await (0, git_1.commitAndPushChanges)('chore: coverage badges [skip ci]');

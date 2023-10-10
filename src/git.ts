@@ -30,5 +30,5 @@ export async function commitAndPushChanges(
 ): Promise<void> {
   await exec.exec('git', ['add', '.'])
   await exec.exec('git', ['commit', '-am', commitMessage])
-  await exec.exec('git', ['push', 'origin'])
+  await exec.exec('git', ['push'])
 }
