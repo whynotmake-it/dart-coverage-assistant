@@ -17723,14 +17723,14 @@ async function generateBadges(projects) {
         const svg = await buildSvg(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage);
         const path = project.pubspecFile.split('/').slice(0, -1).join('/');
         // write svg to file
-        fs.writeFileSync(`${path}/coverage-badge.svg`, svg);
+        fs.writeFileSync(`${path}/coverage.svg`, svg);
     }
     const totalPercentageg = (0, lcov_1.getTotalPercentage)(projects);
     if (totalPercentageg === undefined) {
         return;
     }
     const svg = await buildSvg('total coverage', config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, totalPercentageg);
-    fs.writeFileSync(`./coverage-badge-total.svg`, svg);
+    fs.writeFileSync(`./coverage-total.svg`, svg);
 }
 exports.generateBadges = generateBadges;
 async function buildSvg(name, upper, lower, percentage) {
