@@ -18113,7 +18113,7 @@ exports.configureGit = configureGit;
 async function checkout(ref) {
     // Checkout the branch while keeping local changes
     await exec.exec('git', ['stash']);
-    await exec.exec('git', ['checkout', ref]);
+    await exec.exec('git', ['checkout', `origin/${ref}`]);
     await exec.exec('git', ['stash', 'pop']);
 }
 exports.checkout = checkout;
