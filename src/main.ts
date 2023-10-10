@@ -7,7 +7,7 @@ import { checkout, commitAndPushChanges, configureGit } from './git'
 import { generateBadges } from './badge'
 import { context, getOctokit } from '@actions/github'
 import { Config } from './config'
-import { findPreviousComment, deleteComment, createComment } from './comment'
+import { findPreviousComment, createComment, updateComment } from './comment'
 
 /**
  * The main function for the action.
@@ -69,22 +69,24 @@ export async function run(): Promise<void> {
 
 async function comment(body: string): Promise<void> {
   const octokit = getOctokit(Config.githubToken)
+  const header = 'dart-coverage-assistant'
   if (context.payload.pull_request) {
     const previous = await findPreviousComment(
       octokit,
       context.repo,
       context.payload.pull_request?.number,
-      'dart-coverage-assistant'
+      header
     )
     if (previous) {
-      await deleteComment(octokit, previous.id)
+      await updateComment(octokit, previous.id, body, header)
+    } else {
+      await createComment(
+        octokit,
+        context.repo,
+        context.payload.pull_request?.number,
+        body,
+        header
+      )
     }
-    await createComment(
-      octokit,
-      context.repo,
-      context.payload.pull_request?.number,
-      body,
-      'dart-coverage-assistant'
-    )
   }
 }
