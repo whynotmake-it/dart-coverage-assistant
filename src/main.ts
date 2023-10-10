@@ -4,7 +4,13 @@ import { generateBadges } from './badge'
 import { createComment, findPreviousComment, updateComment } from './comment'
 import { Config } from './config'
 import { findProjects } from './finder'
-import { checkoutRef, commitAndPushChanges, configureGit } from './git'
+import {
+  checkoutRef,
+  commitAndPushChanges,
+  configureGit,
+  popStash,
+  stashChanges
+} from './git'
 import { coverProject, parseLcovBefore } from './lcov'
 import { buildMessage } from './message'
 import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor'
@@ -24,11 +30,13 @@ export async function run(): Promise<void> {
 
     if (Config.compareAgainstBase && context.payload.pull_request) {
       try {
+        await stashChanges()
         await checkoutRef(context.payload.pull_request.base.ref)
         projectsWithCoverage = await Promise.all(
           projectsWithCoverage.map(parseLcovBefore)
         )
         await checkoutRef(context.payload.pull_request.head.ref)
+        await popStash()
       } catch (error) {
         core.warning(`Failed to checkout base ref due to ${error}.`)
       }

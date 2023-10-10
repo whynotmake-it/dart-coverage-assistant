@@ -117,7 +117,7 @@ export function getTotalPercentageBefore(
   const coverages = projects
     .map(p => p.coverageBefore)
     .filter(c => c !== undefined && c !== null)
-    .map(a => getLcovPercentage(a!))
+    .map(a => getLcovPercentage(a as parse.LcovFile[]))
   if (coverages.length === 0) {
     return undefined
   }
