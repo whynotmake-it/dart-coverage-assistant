@@ -4,10 +4,11 @@ import { generateBadges } from './badge'
 import { createComment, findPreviousComment, updateComment } from './comment'
 import { Config } from './config'
 import { findProjects } from './finder'
-import { commitAndPushChanges, configureGit } from './git'
-import { coverProject } from './lcov'
+import { checkoutRef, commitAndPushChanges, configureGit } from './git'
+import { coverProject, parseLcovBefore } from './lcov'
 import { buildMessage } from './message'
 import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor'
+import { parse } from 'path'
 
 /**
  * The main function for the action.
@@ -20,7 +21,19 @@ export async function run(): Promise<void> {
     core.info(`Found ${projects.length} projects`)
 
     core.info(`Parsing coverage...`)
-    const projectsWithCoverage = await Promise.all(projects.map(coverProject))
+    let projectsWithCoverage = await Promise.all(projects.map(coverProject))
+
+    if (Config.compareAgainstBase && context.payload.pull_request) {
+      try {
+        await checkoutRef(context.payload.pull_request.base.ref)
+        projectsWithCoverage = await Promise.all(
+          projectsWithCoverage.map(parseLcovBefore)
+        )
+        await checkoutRef(context.payload.pull_request.head.ref)
+      } catch (error) {
+        core.warning(`Failed to checkout base ref due to ${error}.`)
+      }
+    }
 
     /// Projects that actually have coverage
     const coveredProjects = projectsWithCoverage.filter(p => p.coverage?.length)

@@ -18102,7 +18102,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.commitAndPushChanges = exports.configureGit = void 0;
+exports.commitAndPushChanges = exports.checkoutRef = exports.configureGit = void 0;
 const exec = __importStar(__nccwpck_require__(1514));
 const github_1 = __nccwpck_require__(5438);
 const config_1 = __nccwpck_require__(6373);
@@ -18119,6 +18119,11 @@ async function configureGit() {
     await exec.exec('git', ['remote', 'set-url', 'origin', url]);
 }
 exports.configureGit = configureGit;
+async function checkoutRef(ref) {
+    await exec.exec('git', ['fetch', 'origin', ref]);
+    await exec.exec('git', ['checkout', ref]);
+}
+exports.checkoutRef = checkoutRef;
 async function commitAndPushChanges(commitMessage) {
     await exec.exec('git', ['add', '.']);
     await exec.exec('git', ['commit', '-am', commitMessage]);
@@ -18138,7 +18143,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getTotalPercentage = exports.getProjectPercentage = exports.getLcovPercentage = exports.coverProject = void 0;
+exports.getTotalPercentage = exports.getProjectPercentage = exports.getLcovPercentage = exports.parseLcovBefore = exports.coverProject = void 0;
 const lcov_parse_1 = __importDefault(__nccwpck_require__(7454));
 /**
  * Converts a project into a CoveredProject object by attempting to parse the coverage file
@@ -18149,12 +18154,25 @@ async function coverProject(project) {
     return {
         name: project.name,
         description: project.description,
+        coverageFile: project.coverageFile,
         pubspecFile: project.pubspecFile,
         coverage: await parseLcov(project),
         coverageBefore: undefined
     };
 }
 exports.coverProject = coverProject;
+/**
+ * Should be called once we are in "before" state. Parses coverage file and sets it as coverageBefore
+ * @param project Project to parse
+ * @returns Project including coverage before
+ */
+async function parseLcovBefore(project) {
+    return {
+        ...project,
+        coverageBefore: await parseLcov(project)
+    };
+}
+exports.parseLcovBefore = parseLcovBefore;
 async function parseLcov(project) {
     const file = project.coverageFile;
     if (!file) {
@@ -18249,7 +18267,17 @@ async function run() {
         const projects = await (0, finder_1.findProjects)(null);
         core.info(`Found ${projects.length} projects`);
         core.info(`Parsing coverage...`);
-        const projectsWithCoverage = await Promise.all(projects.map(lcov_1.coverProject));
+        let projectsWithCoverage = await Promise.all(projects.map(lcov_1.coverProject));
+        if (config_1.Config.compareAgainstBase && github_1.context.payload.pull_request) {
+            try {
+                await (0, git_1.checkoutRef)(github_1.context.payload.pull_request.base.ref);
+                projectsWithCoverage = await Promise.all(projectsWithCoverage.map(lcov_1.parseLcovBefore));
+                await (0, git_1.checkoutRef)(github_1.context.payload.pull_request.head.ref);
+            }
+            catch (error) {
+                core.warning(`Failed to checkout base ref due to ${error}.`);
+            }
+        }
         /// Projects that actually have coverage
         const coveredProjects = projectsWithCoverage.filter(p => p.coverage?.length);
         core.info(`${coveredProjects.filter(p => p.coverage).length} projects covered.`);

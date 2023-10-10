@@ -15,6 +15,11 @@ export async function configureGit(): Promise<void> {
   await exec.exec('git', ['remote', 'set-url', 'origin', url])
 }
 
+export async function checkoutRef(ref: string): Promise<void> {
+  await exec.exec('git', ['fetch', 'origin', ref])
+  await exec.exec('git', ['checkout', ref])
+}
+
 export async function commitAndPushChanges(
   commitMessage: string
 ): Promise<void> {

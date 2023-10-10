@@ -1,7 +1,7 @@
 import parse from 'lcov-parse'
 import { Project } from './finder'
 
-export interface CoveredProject {
+export interface CoveredProject extends Project {
   name: string
   description: string
 
@@ -29,9 +29,24 @@ export async function coverProject(project: Project): Promise<CoveredProject> {
   return {
     name: project.name,
     description: project.description,
+    coverageFile: project.coverageFile,
     pubspecFile: project.pubspecFile,
     coverage: await parseLcov(project),
     coverageBefore: undefined
+  }
+}
+
+/**
+ * Should be called once we are in "before" state. Parses coverage file and sets it as coverageBefore
+ * @param project Project to parse
+ * @returns Project including coverage before
+ */
+export async function parseLcovBefore(
+  project: CoveredProject
+): Promise<CoveredProject> {
+  return {
+    ...project,
+    coverageBefore: await parseLcov(project)
   }
 }
 
