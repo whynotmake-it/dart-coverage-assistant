@@ -23,18 +23,17 @@ export async function run(): Promise<void> {
     const projectsWithCoverage = await Promise.all(projects.map(coverProject))
 
     /// Projects that actually have coverage
-    const coveredProjects = projectsWithCoverage.filter(p => p.coverage)
+    const coveredProjects = projectsWithCoverage.filter(p => p.coverage?.length)
 
     core.info(
       `${coveredProjects.filter(p => p.coverage).length} projects covered.`
     )
 
-    core.info(`Configuring git...`)
-    await configureGit()
-
     // If we are in a Pull request and should generate badges
     if (Config.generateBadges && context.payload.pull_request) {
       try {
+        core.info(`Configuring git...`)
+        await configureGit()
         const branch = context.payload.pull_request.ref
         core.info(`Checking out ${branch}...`)
 

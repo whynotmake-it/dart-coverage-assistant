@@ -18122,7 +18122,7 @@ async function checkout(ref) {
     // Checkout the branch while keeping local changes
     await exec.exec('git', ['branch', '-a'], { outStream: process.stdout });
     await exec.exec('git', ['stash']);
-    await exec.exec('git', ['checkout', ref]);
+    await exec.exec('git', ['checkout', `"${ref}"`]);
     await exec.exec('git', ['stash', 'pop']);
 }
 exports.checkout = checkout;
@@ -18258,13 +18258,13 @@ async function run() {
         core.info(`Parsing coverage...`);
         const projectsWithCoverage = await Promise.all(projects.map(lcov_1.coverProject));
         /// Projects that actually have coverage
-        const coveredProjects = projectsWithCoverage.filter(p => p.coverage);
+        const coveredProjects = projectsWithCoverage.filter(p => p.coverage?.length);
         core.info(`${coveredProjects.filter(p => p.coverage).length} projects covered.`);
-        core.info(`Configuring git...`);
-        await (0, git_1.configureGit)();
         // If we are in a Pull request and should generate badges
         if (config_1.Config.generateBadges && github_1.context.payload.pull_request) {
             try {
+                core.info(`Configuring git...`);
+                await (0, git_1.configureGit)();
                 const branch = github_1.context.payload.pull_request.ref;
                 core.info(`Checking out ${branch}...`);
                 await (0, git_1.checkout)(branch);
