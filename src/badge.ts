@@ -25,15 +25,15 @@ export async function generateBadges(
     // write svg to file
     fs.writeFileSync(`${path}/coverage.svg`, svg)
   }
-  const totalPercentageg = getTotalPercentage(projects)
-  if (totalPercentageg === undefined) {
+  const totalPercentage = getTotalPercentage(projects)
+  if (totalPercentage === undefined) {
     return
   }
   const svg = await buildSvg(
-    'total coverage',
+    'Test Coverage',
     Config.upperCoverageThreshold,
     Config.lowerCoverageThreshold,
-    totalPercentageg
+    totalPercentage
   )
   fs.writeFileSync(`./coverage-total.svg`, svg)
 }
@@ -71,8 +71,8 @@ export function buildBadgeUrl(
   } else {
     color = 'critical'
   }
-  const firstHalf = name ? name + '-' : ''
-  const secondHalf = percentage.toFixed(2) + '%'
+  const firstHalf = name ? `${name}-` : ''
+  const secondHalf = `${percentage.toFixed(2)}%`
 
   return `https://img.shields.io/badge/${firstHalf}${secondHalf}-${color}`
 }

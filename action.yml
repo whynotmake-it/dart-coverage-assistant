@@ -28,6 +28,10 @@ inputs:
     description: "Whether to generate badges for the coverage on 'push' workflow triggers. Defaults to true."
     default: "true"
     required: false
+  GITHUB_TOKEN:
+    description: "The GitHub access token (e.g. secrets.GITHUB_TOKEN) used to create or update the comment. This defaults to {{ github.token }}."
+    default: "${{ github.token }}"
+    required: false
 
 # Define your outputs here.
 outputs:

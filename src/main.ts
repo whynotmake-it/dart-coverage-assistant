@@ -11,7 +11,6 @@ import { findPreviousComment, deleteComment, createComment } from './comment'
 
 /**
  * The main function for the action.
- * @returns {Promise<string>} Returns the message that can be used as a code coverage report
  */
 export async function run(): Promise<void> {
   try {

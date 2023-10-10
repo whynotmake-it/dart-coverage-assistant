@@ -17725,11 +17725,11 @@ async function generateBadges(projects) {
         // write svg to file
         fs.writeFileSync(`${path}/coverage.svg`, svg);
     }
-    const totalPercentageg = (0, lcov_1.getTotalPercentage)(projects);
-    if (totalPercentageg === undefined) {
+    const totalPercentage = (0, lcov_1.getTotalPercentage)(projects);
+    if (totalPercentage === undefined) {
         return;
     }
-    const svg = await buildSvg('total coverage', config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, totalPercentageg);
+    const svg = await buildSvg('Test Coverage', config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, totalPercentage);
     fs.writeFileSync(`./coverage-total.svg`, svg);
 }
 exports.generateBadges = generateBadges;
@@ -17754,8 +17754,8 @@ function buildBadgeUrl(name, upper, lower, percentage) {
     else {
         color = 'critical';
     }
-    const firstHalf = name ? name + '-' : '';
-    const secondHalf = percentage.toFixed(2) + '%';
+    const firstHalf = name ? `${name}-` : '';
+    const secondHalf = `${percentage.toFixed(2)}%`;
     return `https://img.shields.io/badge/${firstHalf}${secondHalf}-${color}`;
 }
 exports.buildBadgeUrl = buildBadgeUrl;
@@ -18110,9 +18110,11 @@ async function configureGit() {
     ]);
 }
 exports.configureGit = configureGit;
-async function checkout(branch) {
+async function checkout(ref) {
     // Checkout the branch while keeping local changes
-    await exec.exec('git', ['checkout', branch, '--']);
+    await exec.exec('git', ['stash']);
+    await exec.exec('git', ['checkout', ref]);
+    await exec.exec('git', ['stash', 'pop']);
 }
 exports.checkout = checkout;
 async function commitAndPushChanges(commitMessage) {
@@ -18238,7 +18240,6 @@ const config_1 = __nccwpck_require__(6373);
 const comment_1 = __nccwpck_require__(7810);
 /**
  * The main function for the action.
- * @returns {Promise<string>} Returns the message that can be used as a code coverage report
  */
 async function run() {
     try {
