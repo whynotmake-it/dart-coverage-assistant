@@ -8,7 +8,6 @@ import { generateBadges } from './badge'
 import { context, getOctokit } from '@actions/github'
 import { Config } from './config'
 import { findPreviousComment, createComment, updateComment } from './comment'
-import { GitHub } from '@actions/github/lib/utils'
 
 /**
  * The main function for the action.
