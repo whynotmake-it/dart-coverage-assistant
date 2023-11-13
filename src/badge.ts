@@ -5,6 +5,7 @@ import {
   getProjectPercentage,
   getTotalPercentage
 } from './lcov'
+import { get } from 'http'
 
 export async function generateBadges(
   projects: CoveredProject[]
@@ -47,14 +48,19 @@ async function buildSvg(
   // get url
   const url = buildBadgeUrl(name, upper, lower, percentage)
 
-  const fetch = await import('node-fetch')
-  // fetch url
-  const response = await fetch.default(url)
-
-  // get svg
-  const svg = await response.text()
-
-  return svg
+  return await new Promise<string>((resolve, reject) => {
+    get(url, res => {
+      let data = ''
+      res.on('data', chunk => {
+        data += chunk
+      })
+      res.on('end', () => {
+        resolve(data)
+      })
+    }).on('error', err => {
+      reject(err)
+    })
+  })
 }
 
 export function buildBadgeUrl(

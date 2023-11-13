@@ -28,7 +28,7 @@ export async function findPreviousComment(
   number: number,
   header: string
 ): Promise<IssueComment | undefined> {
-  let after = null
+  let after: string | null | undefined = null
   let hasNextPage = true
   const h = headerComment(header)
   while (hasNextPage) {
