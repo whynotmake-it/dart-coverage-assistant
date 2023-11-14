@@ -14264,7 +14264,7 @@ function getTotalDiff(projects) {
 function buildBadge(upper, lower, percentage) {
     const alt = percentage >= upper ? 'pass' : percentage >= lower ? 'warning' : 'fail';
     const url = (0, badge_1.buildBadgeUrl)(undefined, upper, lower, percentage);
-    return `![${alt}](${encodeURI(url)} "${alt}")`;
+    return `![${alt}](${url} "${alt}")`;
 }
 
 
