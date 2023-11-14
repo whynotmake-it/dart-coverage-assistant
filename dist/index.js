@@ -14313,15 +14313,21 @@ function verifyCoverageThreshold(projects) {
             return (percentage === undefined || percentage < config_1.Config.lowerCoverageThreshold);
         });
         if (failedProjects.length) {
-            core.error(`Coverage threshold not met for ${failedProjects.length} projects`);
+            core.error(`Coverage threshold (${config_1.Config.lowerCoverageThreshold}%) not met for ${failedProjects.length} projects:`);
+            for (const failed of failedProjects) {
+                core.error(`${failed.name} - ${(0, lcov_1.getProjectPercentage)(failed)}%`);
+            }
             return false;
         }
     }
     else if (config_1.Config.enforceThreshold === 'total') {
         const percentage = (0, lcov_1.getTotalPercentage)(projects);
-        if (percentage === undefined ||
-            percentage < config_1.Config.lowerCoverageThreshold) {
-            core.error(`Coverage threshold not met for total coverage`);
+        if (percentage === undefined) {
+            core.error(`Total coverage threshold of ${config_1.Config.lowerCoverageThreshold}% not met.`);
+            return false;
+        }
+        else if (percentage < config_1.Config.lowerCoverageThreshold) {
+            core.error(`Total coverage of ${percentage.toFixed(2)}% does not meet threshold of ${config_1.Config.lowerCoverageThreshold}%`);
             return false;
         }
     }
@@ -14334,13 +14340,16 @@ function verifyNoCoverageDecrease(projects) {
         return true;
     }
     else if (config_1.Config.enforceForbiddenDecrease === 'single') {
-        const failed = projects.filter(p => {
+        const failedProjects = projects.filter(p => {
             const percentage = (0, lcov_1.getProjectPercentage)(p);
             const before = (0, lcov_1.getProjectPercentageBefore)(p);
             return (percentage !== undefined && before !== undefined && percentage < before);
         });
-        if (failed.length) {
-            core.error(`Coverage decrease detected for ${failed.length} projects`);
+        if (failedProjects.length) {
+            core.error(`Coverage decrease detected for ${failedProjects.length} projects:`);
+            for (const failed of failedProjects) {
+                core.error(`${failed.name} - ${(0, lcov_1.getProjectPercentageBefore)(failed)?.toFixed()}% -> ${(0, lcov_1.getProjectPercentage)(failed)?.toFixed(2)}%`);
+            }
             return false;
         }
     }
