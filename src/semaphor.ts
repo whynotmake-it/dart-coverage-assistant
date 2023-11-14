@@ -20,17 +20,26 @@ export function verifyCoverageThreshold(projects: CoveredProject[]): boolean {
     })
     if (failedProjects.length) {
       core.error(
-        `Coverage threshold not met for ${failedProjects.length} projects`
+        `Coverage threshold (${Config.lowerCoverageThreshold}%) not met for ${failedProjects.length} projects:`
       )
+      for (const failed of failedProjects) {
+        core.error(`${failed.name} - ${getProjectPercentage(failed)}%`)
+      }
       return false
     }
   } else if (Config.enforceThreshold === 'total') {
     const percentage = getTotalPercentage(projects)
-    if (
-      percentage === undefined ||
-      percentage < Config.lowerCoverageThreshold
-    ) {
-      core.error(`Coverage threshold not met for total coverage`)
+    if (percentage === undefined) {
+      core.error(
+        `Total coverage threshold of ${Config.lowerCoverageThreshold}% not met.`
+      )
+      return false
+    } else if (percentage < Config.lowerCoverageThreshold) {
+      core.error(
+        `Total coverage of ${percentage.toFixed(
+          2
+        )}% does not meet threshold of ${Config.lowerCoverageThreshold}%`
+      )
       return false
     }
   }
@@ -42,15 +51,24 @@ export function verifyNoCoverageDecrease(projects: CoveredProject[]): boolean {
   if (Config.enforceForbiddenDecrease === 'none') {
     return true
   } else if (Config.enforceForbiddenDecrease === 'single') {
-    const failed = projects.filter(p => {
+    const failedProjects = projects.filter(p => {
       const percentage = getProjectPercentage(p)
       const before = getProjectPercentageBefore(p)
       return (
         percentage !== undefined && before !== undefined && percentage < before
       )
     })
-    if (failed.length) {
-      core.error(`Coverage decrease detected for ${failed.length} projects`)
+    if (failedProjects.length) {
+      core.error(
+        `Coverage decrease detected for ${failedProjects.length} projects:`
+      )
+      for (const failed of failedProjects) {
+        core.error(
+          `${failed.name} - ${getProjectPercentageBefore(
+            failed
+          )?.toFixed()}% -> ${getProjectPercentage(failed)?.toFixed(2)}%`
+        )
+      }
       return false
     }
   } else if (Config.enforceForbiddenDecrease === 'total') {

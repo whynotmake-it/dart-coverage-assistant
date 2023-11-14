@@ -38,7 +38,7 @@ export async function generateBadges(
   fs.writeFileSync(`./coverage-total.svg`, svg)
 }
 
-async function buildSvg(
+export async function buildSvg(
   name: string,
   upper: number,
   lower: number,
@@ -47,14 +47,8 @@ async function buildSvg(
   // get url
   const url = buildBadgeUrl(name, upper, lower, percentage)
 
-  const fetch = await import('node-fetch')
-  // fetch url
-  const response = await fetch.default(url)
-
-  // get svg
-  const svg = await response.text()
-
-  return svg
+  const res = await fetch(url)
+  return res.text()
 }
 
 export function buildBadgeUrl(
@@ -74,5 +68,7 @@ export function buildBadgeUrl(
   const firstHalf = name ? `${name}-` : ''
   const secondHalf = `${percentage.toFixed(2)}%`
 
-  return `https://img.shields.io/badge/${firstHalf}${secondHalf}-${color}`
+  return encodeURI(
+    `http://img.shields.io/badge/${firstHalf}${secondHalf}-${color}`
+  )
 }

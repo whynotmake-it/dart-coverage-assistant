@@ -161,5 +161,5 @@ function buildBadge(upper: number, lower: number, percentage: number): string {
   const alt =
     percentage >= upper ? 'pass' : percentage >= lower ? 'warning' : 'fail'
   const url = buildBadgeUrl(undefined, upper, lower, percentage)
-  return `![${alt}](${encodeURI(url)} "${alt}")`
+  return `![${alt}](${url} "${alt}")`
 }
