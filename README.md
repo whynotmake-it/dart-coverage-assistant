@@ -63,7 +63,8 @@ jobs:
           upper_threshold: 90
 ```
 
-> [!IMPORTANT] With this setup, this action will assume, that your projects have
+> [!IMPORTANT] 
+> With this setup, this action will assume, that your projects have
 > up-to-date coverage. This can be achieved by either running the tests like
 > `flutter test --coverage` in the steps before this action, or always running
 > them locally. Check the section below for more information about configuration
