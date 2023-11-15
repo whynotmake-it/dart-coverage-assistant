@@ -1,6 +1,6 @@
 {
-  "name": "typescript-action",
-  "description": "GitHub Actions TypeScript template",
+  "name": "dart-coverage-assistant",
+  "description": "Magical code coverage reports for your Flutter and Dart projects",
   "version": "0.0.0",
   "author": "",
   "private": true,
