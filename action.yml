@@ -17,7 +17,9 @@ inputs:
     default: "true"
     required: false
   testing_command:
-    "description": "The command(s) to be used for running tests with coverage on the base branch, as well as on push action. If you leave this empty (default) this action will not run any tests at all."
+    description: "The command(s) to be used for running tests with coverage on the base branch, as well as on push action. If you leave this empty (default) this action will not run any tests at all."
+    default: ""
+    required: false
   enforce_threshold:
     description: 'Whether the action should fail if the coverage is below the lower threshold. Can be set to "none", "single", or "total". Defaults to "total".'
     default: "total"
