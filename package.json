@@ -72,7 +72,7 @@
     "@actions/glob": "^0.4.0",
     "@friedemannsommer/lcov-parser": "^3.0.0",
     "@octokit/graphql-schema": "^14.41.0",
-    "@types/lcov-parse": "^1.0.0",
+    "@types/lcov-parse": "^1.0.2",
     "lcov-parse": "^1.0.0",
     "node-fetch": "^3.3.2"
   },
