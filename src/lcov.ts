@@ -1,6 +1,12 @@
 import parse from 'lcov-parse'
 import { Project } from './finder'
 
+export interface LineCoverage {
+  hit: number
+  found: number
+  percentage: number
+}
+
 export interface CoveredProject extends Project {
   name: string
   description: string
@@ -67,59 +73,66 @@ async function parseLcov(
   })
 }
 
-export function getLcovPercentage(lcov: parse.LcovFile[]): number {
+export function getLineCoverage(lcov: parse.LcovFile[]): LineCoverage {
   let hit = 0
   let found = 0
   for (const entry of lcov) {
     hit += entry.lines.hit
     found += entry.lines.found
   }
+  if (!found) {
+    return {
+      hit,
+      found,
+      percentage: 0
+    }
+  }
 
-  return (hit / found) * 100
+  return {
+    hit,
+    found,
+    percentage: (hit / found) * 100
+  }
 }
 
-export function getProjectPercentage(
+export function getProjectLineCoverage(
   project: CoveredProject
-): number | undefined {
+): LineCoverage | undefined {
   if (project.coverage === undefined) {
     return undefined
   }
-  return getLcovPercentage(project.coverage)
+  return getLineCoverage(project.coverage)
 }
 
-export function getProjectPercentageBefore(
+export function getProjectLineCoverageBefore(
   project: CoveredProject
-): number | undefined {
+): LineCoverage | undefined {
   if (project.coverageBefore === undefined) {
     return undefined
   }
   if (project.coverageBefore === null) {
-    return 0
+    return { hit: 0, found: 0, percentage: 0 }
   }
-  return getLcovPercentage(project.coverageBefore)
+  return getLineCoverage(project.coverageBefore)
 }
 
 export function getTotalPercentage(
   projects: CoveredProject[]
-): number | undefined {
+): LineCoverage | undefined {
   const coverages = projects
-    .map(getProjectPercentage)
-    .filter(c => c !== undefined) as number[]
-  if (coverages.length === 0) {
-    return undefined
-  }
-  return coverages.reduce((a, b) => a + b) / coverages.length
+    .map(p => p.coverage)
+    .flat()
+    .filter(c => c !== undefined && c !== null) as parse.LcovFile[]
+
+  return getLineCoverage(coverages)
 }
 
 export function getTotalPercentageBefore(
   projects: CoveredProject[]
-): number | undefined {
+): LineCoverage | undefined {
   const coverages = projects
     .map(p => p.coverageBefore)
-    .filter(c => c !== undefined && c !== null)
-    .map(a => getLcovPercentage(a as parse.LcovFile[]))
-  if (coverages.length === 0) {
-    return undefined
-  }
-  return coverages.reduce((a, b) => a + b) / coverages.length
+    .flat()
+    .filter(c => c !== undefined && c !== null) as parse.LcovFile[]
+  return getLineCoverage(coverages)
 }

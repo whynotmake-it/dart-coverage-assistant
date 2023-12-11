@@ -1,8 +1,8 @@
 import { Config } from './config'
 import {
   CoveredProject,
-  getProjectPercentage,
-  getProjectPercentageBefore,
+  getProjectLineCoverage,
+  getProjectLineCoverageBefore,
   getTotalPercentage,
   getTotalPercentageBefore
 } from './lcov'
@@ -13,7 +13,7 @@ export function verifyCoverageThreshold(projects: CoveredProject[]): boolean {
     return true
   } else if (Config.enforceThreshold === 'single') {
     const failedProjects = projects.filter(p => {
-      const percentage = getProjectPercentage(p)
+      const percentage = getProjectLineCoverage(p)?.percentage
       return (
         percentage === undefined || percentage < Config.lowerCoverageThreshold
       )
@@ -23,12 +23,12 @@ export function verifyCoverageThreshold(projects: CoveredProject[]): boolean {
         `Coverage threshold (${Config.lowerCoverageThreshold}%) not met for ${failedProjects.length} projects:`
       )
       for (const failed of failedProjects) {
-        core.error(`${failed.name} - ${getProjectPercentage(failed)}%`)
+        core.error(`${failed.name} - ${getProjectLineCoverage(failed)}%`)
       }
       return false
     }
   } else if (Config.enforceThreshold === 'total') {
-    const percentage = getTotalPercentage(projects)
+    const percentage = getTotalPercentage(projects)?.percentage
     if (percentage === undefined) {
       core.error(
         `Total coverage threshold of ${Config.lowerCoverageThreshold}% not met.`
@@ -52,8 +52,8 @@ export function verifyNoCoverageDecrease(projects: CoveredProject[]): boolean {
     return true
   } else if (Config.enforceForbiddenDecrease === 'single') {
     const failedProjects = projects.filter(p => {
-      const percentage = getProjectPercentage(p)
-      const before = getProjectPercentageBefore(p)
+      const percentage = getProjectLineCoverage(p)
+      const before = getProjectLineCoverageBefore(p)
       return (
         percentage !== undefined && before !== undefined && percentage < before
       )
@@ -63,17 +63,17 @@ export function verifyNoCoverageDecrease(projects: CoveredProject[]): boolean {
         `Coverage decrease detected for ${failedProjects.length} projects:`
       )
       for (const failed of failedProjects) {
+        const before = getProjectLineCoverageBefore(failed)?.percentage
+        const percentage = getProjectLineCoverage(failed)?.percentage
         core.error(
-          `${failed.name} - ${getProjectPercentageBefore(
-            failed
-          )?.toFixed()}% -> ${getProjectPercentage(failed)?.toFixed(2)}%`
+          `${failed.name} - ${before?.toFixed()}% -> ${percentage?.toFixed(2)}%`
         )
       }
       return false
     }
   } else if (Config.enforceForbiddenDecrease === 'total') {
-    const total = getTotalPercentage(projects)
-    const totalBefore = getTotalPercentageBefore(projects)
+    const total = getTotalPercentage(projects)?.percentage
+    const totalBefore = getTotalPercentageBefore(projects)?.percentage
     if (
       total !== undefined &&
       totalBefore !== undefined &&

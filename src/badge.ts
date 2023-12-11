@@ -2,40 +2,42 @@ import * as fs from 'fs'
 import { Config } from './config'
 import {
   CoveredProject,
-  getProjectPercentage,
-  getTotalPercentage
+  getProjectLineCoverage as getProjectLineCoverage,
+  getTotalPercentage as getTotalLineCoverage
 } from './lcov'
 
 export async function generateBadges(
   projects: CoveredProject[]
 ): Promise<void> {
   for (const project of projects.filter(p => p.coverage)) {
-    const percentage = getProjectPercentage(project)
-    if (percentage === undefined) {
+    const lineCoverage = getProjectLineCoverage(project)
+    if (lineCoverage === undefined) {
       continue
     }
     const svg = await buildSvg(
       project.name,
       Config.upperCoverageThreshold,
       Config.lowerCoverageThreshold,
-      percentage
+      lineCoverage.percentage
     )
 
     const path = project.pubspecFile.split('/').slice(0, -1).join('/')
     // write svg to file
     fs.writeFileSync(`${path}/coverage.svg`, svg)
   }
-  const totalPercentage = getTotalPercentage(projects)
-  if (totalPercentage === undefined) {
-    return
+  if (projects.length > 1) {
+    const totalLineCoverage = getTotalLineCoverage(projects)
+    if (totalLineCoverage === undefined) {
+      return
+    }
+    const svg = await buildSvg(
+      'Test Coverage',
+      Config.upperCoverageThreshold,
+      Config.lowerCoverageThreshold,
+      totalLineCoverage.percentage
+    )
+    fs.writeFileSync(`./coverage-total.svg`, svg)
   }
-  const svg = await buildSvg(
-    'Test Coverage',
-    Config.upperCoverageThreshold,
-    Config.lowerCoverageThreshold,
-    totalPercentage
-  )
-  fs.writeFileSync(`./coverage-total.svg`, svg)
 }
 
 export async function buildSvg(
