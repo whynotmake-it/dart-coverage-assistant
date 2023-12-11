@@ -13474,21 +13474,23 @@ const config_1 = __nccwpck_require__(6373);
 const lcov_1 = __nccwpck_require__(4888);
 async function generateBadges(projects) {
     for (const project of projects.filter(p => p.coverage)) {
-        const percentage = (0, lcov_1.getProjectPercentage)(project);
-        if (percentage === undefined) {
+        const lineCoverage = (0, lcov_1.getProjectLineCoverage)(project);
+        if (lineCoverage === undefined) {
             continue;
         }
-        const svg = await buildSvg(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage);
+        const svg = await buildSvg(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, lineCoverage.percentage);
         const path = project.pubspecFile.split('/').slice(0, -1).join('/');
         // write svg to file
         fs.writeFileSync(`${path}/coverage.svg`, svg);
     }
-    const totalPercentage = (0, lcov_1.getTotalPercentage)(projects);
-    if (totalPercentage === undefined) {
-        return;
+    if (projects.length > 1) {
+        const totalLineCoverage = (0, lcov_1.getTotalPercentage)(projects);
+        if (totalLineCoverage === undefined) {
+            return;
+        }
+        const svg = await buildSvg('Test Coverage', config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, totalLineCoverage.percentage);
+        fs.writeFileSync(`./coverage-total.svg`, svg);
     }
-    const svg = await buildSvg('Test Coverage', config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, totalPercentage);
-    fs.writeFileSync(`./coverage-total.svg`, svg);
 }
 exports.generateBadges = generateBadges;
 async function buildSvg(name, upper, lower, percentage) {
@@ -13911,7 +13913,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getTotalPercentageBefore = exports.getTotalPercentage = exports.getProjectPercentageBefore = exports.getProjectPercentage = exports.getLcovPercentage = exports.parseLcovBefore = exports.coverProject = void 0;
+exports.getTotalPercentageBefore = exports.getTotalPercentage = exports.getProjectLineCoverageBefore = exports.getProjectLineCoverage = exports.getLineCoverage = exports.parseLcovBefore = exports.coverProject = void 0;
 const lcov_parse_1 = __importDefault(__nccwpck_require__(7454));
 /**
  * Converts a project into a CoveredProject object by attempting to parse the coverage file
@@ -13955,52 +13957,58 @@ async function parseLcov(project) {
         });
     });
 }
-function getLcovPercentage(lcov) {
+function getLineCoverage(lcov) {
     let hit = 0;
     let found = 0;
     for (const entry of lcov) {
         hit += entry.lines.hit;
         found += entry.lines.found;
     }
-    return (hit / found) * 100;
+    if (!found) {
+        return {
+            hit,
+            found,
+            percentage: 0
+        };
+    }
+    return {
+        hit,
+        found,
+        percentage: (hit / found) * 100
+    };
 }
-exports.getLcovPercentage = getLcovPercentage;
-function getProjectPercentage(project) {
+exports.getLineCoverage = getLineCoverage;
+function getProjectLineCoverage(project) {
     if (project.coverage === undefined) {
         return undefined;
     }
-    return getLcovPercentage(project.coverage);
+    return getLineCoverage(project.coverage);
 }
-exports.getProjectPercentage = getProjectPercentage;
-function getProjectPercentageBefore(project) {
+exports.getProjectLineCoverage = getProjectLineCoverage;
+function getProjectLineCoverageBefore(project) {
     if (project.coverageBefore === undefined) {
         return undefined;
     }
     if (project.coverageBefore === null) {
-        return 0;
+        return { hit: 0, found: 0, percentage: 0 };
     }
-    return getLcovPercentage(project.coverageBefore);
+    return getLineCoverage(project.coverageBefore);
 }
-exports.getProjectPercentageBefore = getProjectPercentageBefore;
+exports.getProjectLineCoverageBefore = getProjectLineCoverageBefore;
 function getTotalPercentage(projects) {
     const coverages = projects
-        .map(getProjectPercentage)
-        .filter(c => c !== undefined);
-    if (coverages.length === 0) {
-        return undefined;
-    }
-    return coverages.reduce((a, b) => a + b) / coverages.length;
+        .map(p => p.coverage)
+        .flat()
+        .filter(c => c !== undefined && c !== null);
+    return getLineCoverage(coverages);
 }
 exports.getTotalPercentage = getTotalPercentage;
 function getTotalPercentageBefore(projects) {
     const coverages = projects
         .map(p => p.coverageBefore)
-        .filter(c => c !== undefined && c !== null)
-        .map(a => getLcovPercentage(a));
-    if (coverages.length === 0) {
-        return undefined;
-    }
-    return coverages.reduce((a, b) => a + b) / coverages.length;
+        .flat()
+        .filter(c => c !== undefined && c !== null);
+    return getLineCoverage(coverages);
 }
 exports.getTotalPercentageBefore = getTotalPercentageBefore;
 
@@ -14169,9 +14177,9 @@ function buildMessage(projects, url, sha) {
 exports.buildMessage = buildMessage;
 function buildTotalTable(projects) {
     let md = '';
-    const combined = (0, lcov_1.getTotalPercentage)(projects);
-    if (combined !== undefined) {
-        const badge = buildBadge(config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, combined);
+    const totalLineCoverage = (0, lcov_1.getTotalPercentage)(projects);
+    if (totalLineCoverage !== undefined) {
+        const badge = buildBadge(config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, totalLineCoverage.percentage);
         md += `## Total coverage: \n`;
         md += '\n';
         md += `| Coverage | Diff |\n`;
@@ -14188,12 +14196,12 @@ function buildTable(project) {
     return md;
 }
 function buildHeader(project) {
-    const percentage = project.coverage
-        ? (0, lcov_1.getProjectPercentage)(project)
+    const lineCoverage = project.coverage
+        ? (0, lcov_1.getProjectLineCoverage)(project)
         : undefined;
     const diff = buildDiffString(getDiff(project));
-    const badgeCell = percentage
-        ? `${buildBadge(config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, percentage)}`
+    const badgeCell = lineCoverage
+        ? `${buildBadge(config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, lineCoverage.percentage)}`
         : '';
     let md = `## \`${project.name}\`\n`;
     md += '\n';
@@ -14224,7 +14232,7 @@ function buildBody(project) {
         tableMd += `| **${folder}** |   |   |\n`;
         for (const file of folders[folder]) {
             const name = file.file.split('/').slice(-1)[0];
-            tableMd += `| ${name} | ${(0, lcov_1.getLcovPercentage)([file])} | ${file.lines.details.length} |\n`;
+            tableMd += `| ${name} | ${(0, lcov_1.getLineCoverage)([file])} | ${file.lines.details.length} |\n`;
         }
     }
     let md = '<details>\n';
@@ -14253,11 +14261,12 @@ function getDiff(project) {
     if (project.coverageBefore === undefined || !project.coverage) {
         return undefined;
     }
-    const current = (0, lcov_1.getLcovPercentage)(project.coverage);
-    const before = project.coverageBefore === null
-        ? 0
-        : (0, lcov_1.getLcovPercentage)(project.coverageBefore);
-    return current - before;
+    const current = (0, lcov_1.getProjectLineCoverage)(project);
+    const before = (0, lcov_1.getProjectLineCoverageBefore)(project);
+    if (current === undefined || before === undefined) {
+        return undefined;
+    }
+    return current.percentage - before.percentage;
 }
 function getTotalDiff(projects) {
     const current = (0, lcov_1.getTotalPercentage)(projects);
@@ -14265,7 +14274,7 @@ function getTotalDiff(projects) {
     if (current === undefined || before === undefined) {
         return undefined;
     }
-    return current - before;
+    return current.percentage - before.percentage;
 }
 function buildBadge(upper, lower, percentage) {
     const alt = percentage >= upper ? 'pass' : percentage >= lower ? 'warning' : 'fail';
@@ -14315,19 +14324,19 @@ function verifyCoverageThreshold(projects) {
     }
     else if (config_1.Config.enforceThreshold === 'single') {
         const failedProjects = projects.filter(p => {
-            const percentage = (0, lcov_1.getProjectPercentage)(p);
+            const percentage = (0, lcov_1.getProjectLineCoverage)(p)?.percentage;
             return (percentage === undefined || percentage < config_1.Config.lowerCoverageThreshold);
         });
         if (failedProjects.length) {
             core.error(`Coverage threshold (${config_1.Config.lowerCoverageThreshold}%) not met for ${failedProjects.length} projects:`);
             for (const failed of failedProjects) {
-                core.error(`${failed.name} - ${(0, lcov_1.getProjectPercentage)(failed)}%`);
+                core.error(`${failed.name} - ${(0, lcov_1.getProjectLineCoverage)(failed)}%`);
             }
             return false;
         }
     }
     else if (config_1.Config.enforceThreshold === 'total') {
-        const percentage = (0, lcov_1.getTotalPercentage)(projects);
+        const percentage = (0, lcov_1.getTotalPercentage)(projects)?.percentage;
         if (percentage === undefined) {
             core.error(`Total coverage threshold of ${config_1.Config.lowerCoverageThreshold}% not met.`);
             return false;
@@ -14347,21 +14356,23 @@ function verifyNoCoverageDecrease(projects) {
     }
     else if (config_1.Config.enforceForbiddenDecrease === 'single') {
         const failedProjects = projects.filter(p => {
-            const percentage = (0, lcov_1.getProjectPercentage)(p);
-            const before = (0, lcov_1.getProjectPercentageBefore)(p);
+            const percentage = (0, lcov_1.getProjectLineCoverage)(p);
+            const before = (0, lcov_1.getProjectLineCoverageBefore)(p);
             return (percentage !== undefined && before !== undefined && percentage < before);
         });
         if (failedProjects.length) {
             core.error(`Coverage decrease detected for ${failedProjects.length} projects:`);
             for (const failed of failedProjects) {
-                core.error(`${failed.name} - ${(0, lcov_1.getProjectPercentageBefore)(failed)?.toFixed()}% -> ${(0, lcov_1.getProjectPercentage)(failed)?.toFixed(2)}%`);
+                const before = (0, lcov_1.getProjectLineCoverageBefore)(failed)?.percentage;
+                const percentage = (0, lcov_1.getProjectLineCoverage)(failed)?.percentage;
+                core.error(`${failed.name} - ${before?.toFixed()}% -> ${percentage?.toFixed(2)}%`);
             }
             return false;
         }
     }
     else if (config_1.Config.enforceForbiddenDecrease === 'total') {
-        const total = (0, lcov_1.getTotalPercentage)(projects);
-        const totalBefore = (0, lcov_1.getTotalPercentageBefore)(projects);
+        const total = (0, lcov_1.getTotalPercentage)(projects)?.percentage;
+        const totalBefore = (0, lcov_1.getTotalPercentageBefore)(projects)?.percentage;
         if (total !== undefined &&
             totalBefore !== undefined &&
             total < totalBefore) {
