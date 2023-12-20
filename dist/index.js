@@ -14222,8 +14222,8 @@ function buildBody(project) {
     const folders = {};
     // Group files by folder
     for (const file of project.coverage) {
-        const parts = file.file.split('/');
-        const folder = parts.slice(0, -1).join('/');
+        const pubspecPath = project.pubspecFile.split('/').slice(0, -1).join('/');
+        const folder = file.file.split('/').slice(0, -1).join('/').replace(pubspecPath, '');
         folders[folder] = folders[folder] || [];
         folders[folder].push(file);
     }
@@ -14232,7 +14232,7 @@ function buildBody(project) {
         tableMd += `| **${folder}** |   |   |\n`;
         for (const file of folders[folder]) {
             const name = file.file.split('/').slice(-1)[0];
-            tableMd += `| ${name} | ${(0, lcov_1.getLineCoverage)([file])} | ${file.lines.details.length} |\n`;
+            tableMd += `| ${name} | ${(0, lcov_1.getLineCoverage)([file]).percentage.toFixed(2)} | ${file.lines.details.length} |\n`;
         }
     }
     let md = '<details>\n';

@@ -99,11 +99,9 @@ function buildBody(project: CoveredProject): string {
   // Group files by folder
   for (const file of project.coverage) {
     const pubspecPath = project.pubspecFile.split('/').slice(0, -1).join('/')
-    const parts = file.file.split('/')
-    const folder = parts.slice(0, -1).join('/')
-    const relativeFolder = folder.replace(pubspecPath, '').slice(1)
-    folders[relativeFolder] = folders[relativeFolder] || []
-    folders[relativeFolder].push(file)
+    const folder = file.file.split('/').slice(0, -1).join('/').replace(pubspecPath, '')
+    folders[folder] = folders[folder] || []
+    folders[folder].push(file)
   }
 
   // Add all folders to the table
