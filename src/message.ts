@@ -1,8 +1,9 @@
 import { LcovFile } from 'lcov-parse'
 import {
   CoveredProject,
-  getLcovPercentage,
-  getProjectPercentage,
+  getLineCoverage,
+  getProjectLineCoverage,
+  getProjectLineCoverageBefore,
   getTotalPercentage,
   getTotalPercentageBefore
 } from './lcov'
@@ -38,12 +39,12 @@ export function buildMessage(
 
 function buildTotalTable(projects: CoveredProject[]): string {
   let md = ''
-  const combined = getTotalPercentage(projects)
-  if (combined !== undefined) {
+  const totalLineCoverage = getTotalPercentage(projects)
+  if (totalLineCoverage !== undefined) {
     const badge = buildBadge(
       Config.upperCoverageThreshold,
       Config.lowerCoverageThreshold,
-      combined
+      totalLineCoverage.percentage
     )
     md += `## Total coverage: \n`
     md += '\n'
@@ -63,16 +64,16 @@ function buildTable(project: CoveredProject): string {
 }
 
 function buildHeader(project: CoveredProject): string {
-  const percentage = project.coverage
-    ? getProjectPercentage(project)
+  const lineCoverage = project.coverage
+    ? getProjectLineCoverage(project)
     : undefined
   const diff = buildDiffString(getDiff(project))
 
-  const badgeCell = percentage
+  const badgeCell = lineCoverage
     ? `${buildBadge(
         Config.upperCoverageThreshold,
         Config.lowerCoverageThreshold,
-        percentage
+        lineCoverage.percentage
       )}`
     : ''
 
@@ -97,8 +98,12 @@ function buildBody(project: CoveredProject): string {
 
   // Group files by folder
   for (const file of project.coverage) {
-    const parts = file.file.split('/')
-    const folder = parts.slice(0, -1).join('/')
+    const pubspecPath = project.pubspecFile.split('/').slice(0, -1).join('/')
+    const folder = file.file
+      .split('/')
+      .slice(0, -1)
+      .join('/')
+      .replace(pubspecPath, '')
     folders[folder] = folders[folder] || []
     folders[folder].push(file)
   }
@@ -108,9 +113,9 @@ function buildBody(project: CoveredProject): string {
     tableMd += `| **${folder}** |   |   |\n`
     for (const file of folders[folder]) {
       const name = file.file.split('/').slice(-1)[0]
-      tableMd += `| ${name} | ${getLcovPercentage([file])} | ${
-        file.lines.details.length
-      } |\n`
+      tableMd += `| ${name} | ${getLineCoverage([file]).percentage.toFixed(
+        2
+      )} | ${file.lines.details.length} |\n`
     }
   }
 
@@ -140,12 +145,12 @@ function getDiff(project: CoveredProject): number | undefined {
   if (project.coverageBefore === undefined || !project.coverage) {
     return undefined
   }
-  const current = getLcovPercentage(project.coverage)
-  const before =
-    project.coverageBefore === null
-      ? 0
-      : getLcovPercentage(project.coverageBefore)
-  return current - before
+  const current = getProjectLineCoverage(project)
+  const before = getProjectLineCoverageBefore(project)
+  if (current === undefined || before === undefined) {
+    return undefined
+  }
+  return current.percentage - before.percentage
 }
 
 function getTotalDiff(projects: CoveredProject[]): number | undefined {
@@ -154,7 +159,7 @@ function getTotalDiff(projects: CoveredProject[]): number | undefined {
   if (current === undefined || before === undefined) {
     return undefined
   }
-  return current - before
+  return current.percentage - before.percentage
 }
 
 function buildBadge(upper: number, lower: number, percentage: number): string {
