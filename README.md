@@ -126,8 +126,6 @@ what they do.
   to be considered 'good', anything below this is considered critical.
 - `compare_against_base` (optional, default: `true`): Whether to compare against
   the base when running in a PR.
-- `testing_command` (optional, defaults to empty): The command(s) to be used for
-  running tests with coverage, on the base branch, as well as on push action.
 - `enforce_threshold` (optional, default: `'total'`): Whether the action should
   fail if the coverage is below the lower threshold. Can be set to "none",
   "single", or "total".

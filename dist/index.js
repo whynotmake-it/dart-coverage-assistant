@@ -14047,7 +14047,6 @@ const git_1 = __nccwpck_require__(6350);
 const lcov_1 = __nccwpck_require__(4888);
 const message_1 = __nccwpck_require__(7899);
 const semaphor_1 = __nccwpck_require__(3624);
-const tester_1 = __nccwpck_require__(8728);
 /**
  * The main function for the action.
  */
@@ -14056,14 +14055,12 @@ async function run() {
         core.info(`Finding projects...`);
         const projects = await (0, finder_1.findProjects)(null);
         core.info(`Found ${projects.length} projects`);
-        await (0, tester_1.tryRunTestCommand)(true);
         core.info(`Parsing coverage...`);
         let projectsWithCoverage = await Promise.all(projects.map(lcov_1.coverProject));
         if (config_1.Config.compareAgainstBase && github_1.context.payload.pull_request) {
             try {
                 await (0, git_1.stashChanges)();
                 await (0, git_1.checkoutRef)(github_1.context.payload.pull_request.base.ref);
-                await (0, tester_1.tryRunTestCommand)(true);
                 projectsWithCoverage = await Promise.all(projectsWithCoverage.map(lcov_1.parseLcovBefore));
                 await (0, git_1.checkoutRef)(github_1.context.payload.pull_request.head.ref);
                 await (0, git_1.popStash)();
@@ -14372,59 +14369,6 @@ function verifyNoCoverageDecrease(projects) {
     return true;
 }
 exports.verifyNoCoverageDecrease = verifyNoCoverageDecrease;
-
-
-/***/ }),
-
-/***/ 8728:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.tryRunTestCommand = void 0;
-const exec = __importStar(__nccwpck_require__(1514));
-const config_1 = __nccwpck_require__(6373);
-const core = __importStar(__nccwpck_require__(2186));
-async function tryRunTestCommand(mustSucceed) {
-    const testCommand = config_1.Config.testCommand;
-    if (!testCommand) {
-        return;
-    }
-    const output = await exec.getExecOutput(testCommand);
-    core.info(output.stdout);
-    if (output.exitCode) {
-        core.warning(output.stderr);
-        if (mustSucceed) {
-            core.setFailed(`Test command '${testCommand}' failed`);
-            throw new Error(`Test command '${testCommand}' failed`);
-        }
-    }
-}
-exports.tryRunTestCommand = tryRunTestCommand;
 
 
 /***/ }),
