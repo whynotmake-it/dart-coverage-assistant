@@ -4,14 +4,6 @@ author: "whynotmake.it"
 
 # Define your inputs here.
 inputs:
-  GITHUB_TOKEN:
-    description: "The GitHub access token (e.g. secrets.GITHUB_TOKEN) used to create or update the comment. This defaults to {{ github.token }}."
-    default: "${{ github.token }}"
-    required: false
-  GITHUB_HEAD_REF:
-    description: "The branch or tag ref that is being merged into the base branch or tag. This defaults to {{ github.head_ref }}."
-    default: "${{ github.head_ref }}"
-    required: false
   lower_threshold:
     description: "The lower threshold for code coverage, anything below this is considered a failure. Defaults to 100"
     default: "100"
@@ -24,10 +16,6 @@ inputs:
     description: "Whether to compare against the base when running in a PR. Defaults to true."
     default: "true"
     required: false
-  testing_command:
-    description: "The command(s) to be used for running tests with coverage on the base branch, as well as on push action. If you leave this empty (default) this action will not run any tests at all."
-    default: ""
-    required: false
   enforce_threshold:
     description: 'Whether the action should fail if the coverage is below the lower threshold. Can be set to "none", "single", or "total". Defaults to "total".'
     default: "total"
@@ -39,6 +27,14 @@ inputs:
   generate_badges:
     description: "Whether to generate badges for the coverage on 'push' workflow triggers. Defaults to true."
     default: "true"
+    required: false
+  GITHUB_TOKEN:
+    description: "The GitHub access token (e.g. secrets.GITHUB_TOKEN) used to create or update the comment. This defaults to {{ github.token }}."
+    default: "${{ github.token }}"
+    required: false
+  GITHUB_HEAD_REF:
+    description: "The branch or tag ref that is being merged into the base branch or tag. This defaults to {{ github.head_ref }}."
+    default: "${{ github.head_ref }}"
     required: false
 
 # Define your outputs here.

@@ -14,7 +14,6 @@ import {
 import { coverProject, parseLcovBefore } from './lcov'
 import { buildMessage } from './message'
 import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor'
-import { tryRunTestCommand } from './tester'
 
 /**
  * The main function for the action.
@@ -25,7 +24,7 @@ export async function run(): Promise<void> {
 
     const projects = await findProjects(null)
     core.info(`Found ${projects.length} projects`)
-    await tryRunTestCommand(true)
+
     core.info(`Parsing coverage...`)
     let projectsWithCoverage = await Promise.all(projects.map(coverProject))
 
@@ -33,7 +32,6 @@ export async function run(): Promise<void> {
       try {
         await stashChanges()
         await checkoutRef(context.payload.pull_request.base.ref)
-        await tryRunTestCommand(true)
         projectsWithCoverage = await Promise.all(
           projectsWithCoverage.map(parseLcovBefore)
         )
@@ -56,6 +54,7 @@ export async function run(): Promise<void> {
       try {
         core.info(`Configuring git...`)
         await configureGit()
+
         core.info('Updating and pushing coverage badge...')
         await generateBadges(coveredProjects)
         await commitAndPushChanges('chore: coverage badges [skip ci]')

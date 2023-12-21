@@ -1,148 +1,199 @@
-# Dart Coverage Assistant 🎯🧪
+# Create a JavaScript Action Using TypeScript
 
-A no-brainer tool to generate coverage reports for your Dart projects. Plug and
-play, both for your existing CI, or in a new project.
+[![GitHub Super-Linter](https://github.com/actions/typescript-action/actions/workflows/linter.yml/badge.svg)](https://github.com/super-linter/super-linter)
+![CI](https://github.com/actions/typescript-action/actions/workflows/ci.yml/badge.svg)
 
-[![Empowered by whynotmake.it][wnmi_badge]](whynotmake.it)
-[![License: MIT][mit_badge]](./LICENSE) ![Test coverage](./badges/coverage.svg)
+Use this template to bootstrap the creation of a TypeScript action. :rocket:
 
-## Features
+This template includes compilation support, tests, a validation workflow,
+publishing, and versioning guidance.
 
-### 🔌 Plug and Play
+If you are new, there's also a simpler introduction in the
+[Hello world JavaScript action repository](https://github.com/actions/hello-world-javascript-action).
 
-- No configuration needed, just add the action to your workflow
-- Automatically finds all projects in your repository
-- Doesn't run any tests by default, so it works with your existing CI
-- Can run tests for you (good if you have no CI yet)
+## Create Your Own Action
 
-### 💬 Keep an eye on your coverage
+To create your own action, you can use this repository as a template! Just
+follow the below instructions:
 
-- Post a sticky comment on every PR
-- Updates automatically if you make changes
-- Shows coverage for every project in your repository
-- Can show differences between the current and the base branch
+1. Click the **Use this template** button at the top of the repository
+1. Select **Create a new repository**
+1. Select an owner and name for your new repository
+1. Click **Create repository**
+1. Clone your new repository
 
-### 👮‍♂️ Enforce rules
+## Initial Setup
 
-- Choose between multiple rules:
-  - Fail the action if total repo coverage drops below threshold
-  - Fail the action if any single project coverage drops below threshold
-  - Fail the action if total repo coverage decreases in PR
-  - Fail the action if any single project coverage decreases in PR
+After you've cloned the repository to your local machine or codespace, you'll
+need to perform some initial setup steps before you can develop your action.
 
-### 🔰 Generate Badges
+> [!NOTE]
+>
+> You'll need to have a reasonably modern version of
+> [Node.js](https://nodejs.org) handy. If you are using a version manager like
+> [`nodenv`](https://github.com/nodenv/nodenv) or
+> [`nvm`](https://github.com/nvm-sh/nvm), you can run `nodenv install` in the
+> root of your repository to install the version specified in
+> [`package.json`](./package.json). Otherwise, 20.x or later should work!
 
-- Show off your coverage in your README or on your website, without signing up
-  to a third party service
-- Generate badges on `push` events
+1. :hammer_and_wrench: Install the dependencies
 
-## Get Started
+   ```bash
+   npm install
+   ```
 
-Getting started with `dart-coverage-assistant` is easy. It works out of the box
-with your existing CI pipeline to give you the power of coverage reporting. If
-you don't have a CI yet, it can also run your tests for you.
+1. :building_construction: Package the TypeScript for distribution
 
-### For CI Aficionados
+   ```bash
+   npm run bundle
+   ```
+
+1. :white_check_mark: Run the tests
+
+   ```bash
+   $ npm test
+
+   PASS  ./index.test.js
+     ✓ throws invalid number (3ms)
+     ✓ wait 500 ms (504ms)
+     ✓ test runs (95ms)
+
+   ...
+   ```
+
+## Update the Action Metadata
+
+The [`action.yml`](action.yml) file defines metadata about your action, such as
+input(s) and output(s). For details about this file, see
+[Metadata syntax for GitHub Actions](https://docs.github.com/en/actions/creating-actions/metadata-syntax-for-github-actions).
+
+When you copy this repository, update `action.yml` with the name, description,
+inputs, and outputs for your action.
+
+## Update the Action Code
+
+The [`src/`](./src/) directory is the heart of your action! This contains the
+source code that will be run when your action is invoked. You can replace the
+contents of this directory with your own code.
+
+There are a few things to keep in mind when writing your action code:
+
+- Most GitHub Actions toolkit and CI/CD operations are processed asynchronously.
+  In `main.ts`, you will see that the action is run in an `async` function.
+
+  ```javascript
+  import * as core from '@actions/core'
+  //...
+
+  async function run() {
+    try {
+      //...
+    } catch (error) {
+      core.setFailed(error.message)
+    }
+  }
+  ```
+
+  For more information about the GitHub Actions toolkit, see the
+  [documentation](https://github.com/actions/toolkit/blob/master/README.md).
+
+So, what are you waiting for? Go ahead and start customizing your action!
+
+1. Create a new branch
+
+   ```bash
+   git checkout -b releases/v1
+   ```
+
+1. Replace the contents of `src/` with your action code
+1. Add tests to `__tests__/` for your source code
+1. Format, test, and build the action
+
+   ```bash
+   npm run all
+   ```
+
+   > [!WARNING]
+   >
+   > This step is important! It will run [`ncc`](https://github.com/vercel/ncc)
+   > to build the final JavaScript action code with all dependencies included.
+   > If you do not run this step, your action will not work correctly when it is
+   > used in a workflow. This step also includes the `--license` option for
+   > `ncc`, which will create a license file for all of the production node
+   > modules used in your project.
+
+1. Commit your changes
+
+   ```bash
+   git add .
+   git commit -m "My first action is ready!"
+   ```
+
+1. Push them to your repository
+
+   ```bash
+   git push -u origin releases/v1
+   ```
+
+1. Create a pull request and get feedback on your action
+1. Merge the pull request into the `main` branch
+
+Your action is now published! :rocket:
+
+For information about versioning your action, see
+[Versioning](https://github.com/actions/toolkit/blob/master/docs/action-versioning.md)
+in the GitHub Actions toolkit.
+
+## Validate the Action
+
+You can now validate the action by referencing it in a workflow file. For
+example, [`ci.yml`](./.github/workflows/ci.yml) demonstrates how to reference an
+action in the same repository.
 
 ```yaml
-jobs:
-  flutter-check:
-    name: Build Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      # ---
-      # Your existing steps...
-      # ---
-      - name: 📊 Generate Coverage
-        id: coverage-report
-        uses: whynotmake-it/dart-coverage-assistant@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          lower_threshold: 50
-          upper_threshold: 90
+steps:
+  - name: Checkout
+    id: checkout
+    uses: actions/checkout@v3
+
+  - name: Test Local Action
+    id: test-action
+    uses: ./
+    with:
+      milliseconds: 1000
+
+  - name: Print Output
+    id: output
+    run: echo "${{ steps.test-action.outputs.time }}"
 ```
 
-> [!IMPORTANT] 
-> With this setup, this action will assume, that your projects have
-> up-to-date coverage. This can be achieved by either running the tests like
-> `flutter test --coverage` in the steps before this action, or always running
-> them locally. Check the section below for more information about configuration
-> options.
+For example workflow runs, check out the
+[Actions tab](https://github.com/actions/typescript-action/actions)! :rocket:
 
-### For CI Newbies
+## Usage
 
-If you just want a drop-in CI pipeline, just copy the following into your
-`.github/workflows/main.yml` file. This will run your tests and generate a
-coverage report for you.
+After testing, you can create version tag(s) that developers can use to
+reference different stable versions of your action. For more information, see
+[Versioning](https://github.com/actions/toolkit/blob/master/docs/action-versioning.md)
+in the GitHub Actions toolkit.
+
+To include the action in a workflow in another repository, you can use the
+`uses` syntax with the `@` symbol to reference a specific branch, tag, or commit
+hash.
 
 ```yaml
-name: Continuous Integration
+steps:
+  - name: Checkout
+    id: checkout
+    uses: actions/checkout@v3
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  - name: Test Local Action
+    id: test-action
+    uses: actions/typescript-action@v1 # Commit with the `v1` tag
+    with:
+      milliseconds: 1000
 
-on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
-
-jobs:
-  flutter-check:
-    name: Build Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: 📚 Checkout
-        uses: actions/checkout@v4
-
-      - name: 🐦 Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          sdk: 'stable'
-
-      - name: 📊 Generate Coverage
-        id: coverage-report
-        uses: whynotmake-it/dart-coverage-assistant@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          testing_command: flutter test --coverage
-          lower_threshold: 50
-          upper_threshold: 90
+  - name: Print Output
+    id: output
+    run: echo "${{ steps.test-action.outputs.time }}"
 ```
-
-## Configuration
-
-Below you will find a short list of all available configuration options, and
-what they do.
-
-- `lower_threshold` (optional, default: `100`): The lower threshold for code
-  coverage, anything below this is considered a failure.
-- `upper_threshold` (optional, default: `100`): The threshold for the coverage
-  to be considered 'good', anything below this is considered critical.
-- `compare_against_base` (optional, default: `true`): Whether to compare against
-  the base when running in a PR.
-- `testing_command` (optional, defaults to empty): The command(s) to be used for
-  running tests with coverage, on the base branch, as well as on push action.
-- `enforce_threshold` (optional, default: `'total'`): Whether the action should
-  fail if the coverage is below the lower threshold. Can be set to "none",
-  "single", or "total".
-- `enforce_forbidden_decrease` (optional, default: `'total'`): Whether the
-  action should fail if the coverage decreases. Can be set to "none", "single",
-  or "total".
-- `generate_badges` (optional, default: `true`): Whether to generate badges for
-  the coverage on 'push' workflow triggers.
-
-## Honorable mentions
-
-- Big thanks to @JohannSchramm for his help and being an inspiration for this
-  project.
-
-[mit_badge]:
-  https://img.shields.io/github/license/artiomtr/jest-coverage-report-action
-[wnmi_badge]:
-  https://img.shields.io/badge/empowered_by-whynotmake.it-black?logo=data%3Aimage%2Fpng%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAAJYAAACWCAYAAAA8AXHiAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAe2SURBVHgB7Z2BlaM2EIbHqWBLoITtIE4HlwpMKthNBSYV5DpYXwWXVOB0cNcB6WC3g4l44Lw5kECCEUjwf%2B%2Fx%2FNaGGYG%2BNQLGQAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHAgTpQgzHw2L0X35%2FfT6fSdVsDkfTIvL2Y6m%2BnZTM3fH00bzPTFtONGID9Mx76Y6Z2H1GYqKCIm%2FidH7lXbAZQxHXblaS4UAc%2FcDxr5ngmkT2DHqsoVmBty5YKjY5uOezPTV44oF7ulqrgdbzXzPJvpBrkyYkSqZzFPyRHkGpGqdMxfTbUVJICPVGJeVblCpRLLQa6UCZFKLKMi11ypxPKQK0XmSCWWXSTXUqlEHMiVEkukEjFmyaUllYgHuVJAQyoRK0gubalEXJdcTwTioymViOklVyypRHybXBWBuMSQSsR2yfWp%2B%2FwlplSiHZ978b8RiEdMqUSO0pVjDam6NhSW%2FG8xch2esQ4nZUZyRZdqJP%2BDmjGg16PboNGlEvkqHueVIsDtt1U9kRtHixqYjXi2bNyoG9aRU1KQMp5SHVKunygORe%2Fvv1co1vt54vOSFOlEvdNwXW9m%2BtVMX3rvN6cg7keSSx0ejjnuFBH2L33RqopwfVNVvflwElUTth%2BRrV2kd%2BcIcvlKJeaHXJo4OnatIr2y%2BzzoDL1HviCpxHKQSwt2D6ZjF%2BmVvfm0qiJmSSWWh1xaMCdTpLe0KmKRVCIO5NKC0ynSm1sVoSKViAe5tOB0ivRCqyJUpRJxXXIVBMLgdIr0fKsiokgl4tvk%2BkwgHOZkivRc7XjtPj%2FHlEq0oy%2FXO4F5MCdTpOdqh4uKImDLw%2B0tBkAozMkU6fnKVVEEeFhuI6kZA%2FpwRjr1yu2u6E%2BOKJVHOx68UQRM3CczfZvIjaPFOXD47qikCEy040zKeEoFuZbA%2FnKVFJGRdlSkyIhUzXvN%2BOrGkEsHbm8hVPNGUol2qJxvG4k%2FJtWTmA8nUbXglcZUHu2IdRnKSyoxP%2BRaCkc%2B%2BpvRHu3LUEFSieUg11xSk0q0S%2Bsy1CypxPKQK5RUpXqwVK6lUok4kMuX1KV6MFcuLalEPMg1RS5SPeDwy1CqUom4qIpwkZtUD9j%2FMlQUqUR8m1xRf6ySPOy%2BNlZSBvB0VURUqUQ7BlURmvGzw7HRS8qIEblc94hXlUq0o%2B7lufARx1ts%2F0lYSRnC0z%2FnjypV14YxkQs6CmZlX3sb4C%2FKFG53eVNPsYgp1XUi93GOFnl4D6koN%2BlYCx6vTthSqiTkinXvBhv9Df1BK8BtbVdzkbugdWjuUfHL6XRSX79GKvNS9d5u8tzM1N8DHONeETwsBykpMvzjQLvWkovdR7drf1PVcp34iCdRNxLrPtYRM2M%2Bsb3EZ1OpxLzHkmsjsSrfDvGMt8p5ql7Oa%2Bg6HEquLcRy5J3sGEecLKQSyx5Drq3EcuT27qBu%2BaykEjH2L9eWYjnye3VUrlKJWPu%2BcL21WI42jHZY7lKJmPu9cJ2CWI52WDuO21MK2UslYtvkyv%2FCNQ8P%2FUvaCIdc3LXxrXt934tUIsc9lT5QoeusPmfakBG5XGQtVZenf1mtolxxSFVTAgTIlb1UXa5qF2K5pOKEjkg85Kr3IFWX797L9YlyY%2B2NtoQJuc4UgQ2kerHkKygn2H6RNtpG02BErpKU2UCqiyVffqcbeLgLjLbRNGGlyz8TOa6xc%2FTyXdhOQbnBw%2FM%2FJWVCTLkSkirPIkvLimR1Ii6GXAlJVVGu9NeEMkRTLkilBA8L4c6UIRpyQSpFLB2S7QXPJXJBKmXY%2FoCmKDeJXYM5ckGqSLD9sXKHkAtSRYTdjwzZtVyQagUOJtdXtn9LQ6oYHEguhlQrc1C5aki1AgeUK8plE0hl4WByqYs1IhVuF3kguWrWrYq48DQqT9DIFsgVHPvC%2FkAuhlw%2BMS8OgZrSpDvksgC5JmNdHOJUYp5XyGUBcjljXHhCKjFvCbksQK7Bshf2lEosA7lsQK7%2Fl7lwoFRiWZtcOBVxdLlY4eSnQ67PdHSOKpeGVCJWf0D%2FTuBwclXsfrpsRTPh4U1NCgKHr4pYJFWXq4ZYDvYmF%2Fs90WKxVF2uGmKNsEO5pr61KlIAYnmwJ7kmxKpICYjlyV7kcqyDqlSOPAUBO7nLxfZbCTWo%2F%2B4SYgWSq1w8XvryjZSBWDPITS7eoEgPYs0kF7l4vJw4mlwQawGpyzUiVcX2RxmryQWxFpKqXOxXpFfGkgtiKZCaXJxAkR4Pd7X5P4ViC1KQi9tLNldfqcRyLrlm%2FYTM0oaaVuZEO4Lbr%2FvmnFDR%2B%2Bh2Op1%2BowC6%2F%2FCrmULuhV443v%2FD5K9oPF9pXmz%2FBB8U9vzsJxo%2Bfzt4%2FUEPjW%2BukRhzqALylqxPzRhf6cAL5GI9qZoxTvCTH7iVy6cCwoea9%2F4U%2B7XhGXKxjlQ1t6cTZg%2BWu3bceL5g70vbsJRdjbH68MiYy0y%2Fm3HHh8e8X8xUkQcm3r%2BkTCdHiCAfcr1AJNj9LdS899b9Z98d%2F%2Fk3AsAFz9vF3QiAKQLlws%2BlQBjdrs8lWHOjjfye4Zcgux68j8Ht0zKaQ%2FFmYNwMdr%2BbQe8%2FBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASfAfQWaAgS7EyI8AAAAASUVORK5CYII%3D

@@ -23,10 +23,6 @@ export class Config {
     return getInput('compare_against_base') === 'true'
   }
 
-  static get testCommand(): string | null {
-    return getInput('test_command') || null
-  }
-
   static get enforceThreshold(): CoverageRule {
     return this.parseCoverageRule(getInput('enforce_threshold'))
   }
