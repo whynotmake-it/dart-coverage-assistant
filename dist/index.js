@@ -13699,9 +13699,6 @@ class Config {
     static get compareAgainstBase() {
         return (0, core_1.getInput)('compare_against_base') === 'true';
     }
-    static get testCommand() {
-        return (0, core_1.getInput)('test_command') || null;
-    }
     static get enforceThreshold() {
         return this.parseCoverageRule((0, core_1.getInput)('enforce_threshold'));
     }
