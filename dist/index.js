@@ -14223,7 +14223,11 @@ function buildBody(project) {
     // Group files by folder
     for (const file of project.coverage) {
         const pubspecPath = project.pubspecFile.split('/').slice(0, -1).join('/');
-        const folder = file.file.split('/').slice(0, -1).join('/').replace(pubspecPath, '');
+        const folder = file.file
+            .split('/')
+            .slice(0, -1)
+            .join('/')
+            .replace(pubspecPath, '');
         folders[folder] = folders[folder] || [];
         folders[folder].push(file);
     }

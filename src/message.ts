@@ -99,7 +99,11 @@ function buildBody(project: CoveredProject): string {
   // Group files by folder
   for (const file of project.coverage) {
     const pubspecPath = project.pubspecFile.split('/').slice(0, -1).join('/')
-    const folder = file.file.split('/').slice(0, -1).join('/').replace(pubspecPath, '')
+    const folder = file.file
+      .split('/')
+      .slice(0, -1)
+      .join('/')
+      .replace(pubspecPath, '')
     folders[folder] = folders[folder] || []
     folders[folder].push(file)
   }
@@ -109,9 +113,9 @@ function buildBody(project: CoveredProject): string {
     tableMd += `| **${folder}** |   |   |\n`
     for (const file of folders[folder]) {
       const name = file.file.split('/').slice(-1)[0]
-      tableMd += `| ${name} | ${getLineCoverage([file]).percentage.toFixed(2)} | ${
-        file.lines.details.length
-      } |\n`
+      tableMd += `| ${name} | ${getLineCoverage([file]).percentage.toFixed(
+        2
+      )} | ${file.lines.details.length} |\n`
     }
   }
 
