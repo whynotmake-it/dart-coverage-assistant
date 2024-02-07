@@ -11,7 +11,7 @@ import {
   popStash,
   stashChanges
 } from './git'
-import { coverProject, parseLcovBefore } from './lcov'
+import { CoveredProject, coverProject, parseLcovBefore } from './lcov'
 import { buildMessage } from './message'
 import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor'
 
@@ -50,17 +50,7 @@ export async function run(): Promise<void> {
 
     // If we are in a Push event and generateBadges is true, generate badges
     if (Config.generateBadges && context.eventName === 'push') {
-      try {
-        core.info(`Configuring git...`)
-        await configureGit()
-        core.info('Updating and pushing coverage badge...')
-        await generateBadges(coveredProjects)
-        await commitAndPushChanges('chore: coverage badges [skip ci]')
-      } catch (error) {
-        core.warning(
-          `Failed to commit and push coverage badge due to ${error}.`
-        )
-      }
+      await generateBadgesAndCommit(coveredProjects)
     }
 
     const pr = context.payload.pull_request
@@ -77,6 +67,12 @@ export async function run(): Promise<void> {
         await comment(message)
       } catch (error) {
         core.warning(`Failed to comment due to ${error}.`)
+      }
+
+      // If commitToPullRequest is true, commit the coverage changes to the PR
+      if (Config.commitToPullRequest) {
+        core.info(`Committing coverage badge to PR...`)
+        await generateBadgesAndCommit(coveredProjects)
       }
     }
 
@@ -116,5 +112,19 @@ async function comment(body: string): Promise<void> {
     }
   } else {
     core.info(`Not a pull request, skipping comment`)
+  }
+}
+
+async function generateBadgesAndCommit(
+  coveredProjects: CoveredProject[]
+): Promise<void> {
+  try {
+    core.info(`Configuring git...`)
+    await configureGit()
+    core.info('Updating and pushing coverage badge...')
+    await generateBadges(coveredProjects)
+    await commitAndPushChanges('chore: coverage badges [skip ci]')
+  } catch (error) {
+    core.warning(`Failed to commit and push coverage badge due to ${error}.`)
   }
 }
