@@ -13710,6 +13710,9 @@ class Config {
     static get generateBadges() {
         return (0, core_1.getInput)('generate_badges') === 'true';
     }
+    static get commitToPullRequest() {
+        return (0, core_1.getInput)('commit_to_pull_request') === 'true';
+    }
     static parseCoverageRule(rule) {
         switch (rule) {
             case 'none':
@@ -14079,16 +14082,7 @@ async function run() {
         core.info(`${coveredProjects.filter(p => p.coverage).length} projects covered.`);
         // If we are in a Push event and generateBadges is true, generate badges
         if (config_1.Config.generateBadges && github_1.context.eventName === 'push') {
-            try {
-                core.info(`Configuring git...`);
-                await (0, git_1.configureGit)();
-                core.info('Updating and pushing coverage badge...');
-                await (0, badge_1.generateBadges)(coveredProjects);
-                await (0, git_1.commitAndPushChanges)('chore: coverage badges [skip ci]');
-            }
-            catch (error) {
-                core.warning(`Failed to commit and push coverage badge due to ${error}.`);
-            }
+            await generateBadgesAndCommit(coveredProjects);
         }
         const pr = github_1.context.payload.pull_request;
         if (pr) {
@@ -14100,6 +14094,11 @@ async function run() {
             }
             catch (error) {
                 core.warning(`Failed to comment due to ${error}.`);
+            }
+            // If commitToPullRequest is true, commit the coverage changes to the PR
+            if (config_1.Config.commitToPullRequest) {
+                core.info(`Committing coverage badge to PR...`);
+                await generateBadgesAndCommit(coveredProjects);
             }
         }
         const coverageThresholdMet = (0, semaphor_1.verifyCoverageThreshold)(coveredProjects);
@@ -14131,6 +14130,18 @@ async function comment(body) {
     }
     else {
         core.info(`Not a pull request, skipping comment`);
+    }
+}
+async function generateBadgesAndCommit(coveredProjects) {
+    try {
+        core.info(`Configuring git...`);
+        await (0, git_1.configureGit)();
+        core.info('Updating and pushing coverage badge...');
+        await (0, badge_1.generateBadges)(coveredProjects);
+        await (0, git_1.commitAndPushChanges)('chore: coverage badges [skip ci]');
+    }
+    catch (error) {
+        core.warning(`Failed to commit and push coverage badge due to ${error}.`);
     }
 }
 
