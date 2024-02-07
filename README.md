@@ -63,7 +63,7 @@ jobs:
           upper_threshold: 90
 ```
 
-> [!IMPORTANT] 
+> [!IMPORTANT]
 > With this setup, this action will assume, that your projects have
 > up-to-date coverage. This can be achieved by either running the tests like
 > `flutter test --coverage` in the steps before this action, or always running
@@ -134,6 +134,8 @@ what they do.
   or "total".
 - `generate_badges` (optional, default: `true`): Whether to generate badges for
   the coverage on 'push' workflow triggers.
+- `commit_to_pull_request` (optional, default: `false`): Whether to commit the
+  generated badge to the pull request, additionally to the sticky comment.
 
 ## Honorable mentions
 

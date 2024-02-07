@@ -35,6 +35,10 @@ export class Config {
     return getInput('generate_badges') === 'true'
   }
 
+  static get commitToPullRequest(): boolean {
+    return getInput('commit_to_pull_request') === 'true'
+  }
+
   private static parseCoverageRule(rule: string): CoverageRule {
     switch (rule) {
       case 'none':
