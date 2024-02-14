@@ -1,4 +1,5 @@
-import parse from 'lcov-parse'
+import { createReadStream } from 'node:fs'
+import lcovParser, { SectionSummary } from '@friedemannsommer/lcov-parser'
 import { Project } from './finder'
 
 export interface LineCoverage {
@@ -16,14 +17,14 @@ export interface CoveredProject extends Project {
   /**
    * Parsed coverage files for this project. If undefined, this project wasn't covered.
    */
-  coverage: parse.LcovFile[] | undefined
+  coverage: SectionSummary[] | undefined
 
   /**
    * A coverage file that was parsed before the current coverage file.
    * If this is undefined, assume this is the first run and don't generate diffs.
    * If this is null, assume it is zero coverage.
    */
-  coverageBefore: parse.LcovFile[] | null | undefined
+  coverageBefore: SectionSummary[] | null | undefined
 }
 
 /**
@@ -58,27 +59,21 @@ export async function parseLcovBefore(
 
 async function parseLcov(
   project: Project
-): Promise<parse.LcovFile[] | undefined> {
+): Promise<SectionSummary[] | undefined> {
   const file = project.coverageFile
   if (!file) {
     return undefined
   }
-  return new Promise((resolve, reject) => {
-    parse(file, (err, data) => {
-      if (err) {
-        reject(err)
-      }
-      resolve(data)
-    })
-  })
+
+  return lcovParser({ from: createReadStream(file) })
 }
 
-export function getLineCoverage(lcov: parse.LcovFile[]): LineCoverage {
+export function getLineCoverage(lcov: SectionSummary[]): LineCoverage {
   let hit = 0
   let found = 0
   for (const entry of lcov) {
     hit += entry.lines.hit
-    found += entry.lines.found
+    found += entry.lines.instrumented
   }
   if (!found) {
     return {
@@ -119,20 +114,29 @@ export function getProjectLineCoverageBefore(
 export function getTotalPercentage(
   projects: CoveredProject[]
 ): LineCoverage | undefined {
-  const coverages = projects
-    .map(p => p.coverage)
-    .flat()
-    .filter(c => c !== undefined && c !== null) as parse.LcovFile[]
-
-  return getLineCoverage(coverages)
+  return getLineCoverage(getProjectCoverage(projects, 'coverage'))
 }
 
 export function getTotalPercentageBefore(
   projects: CoveredProject[]
-): LineCoverage | undefined {
-  const coverages = projects
-    .map(p => p.coverageBefore)
-    .flat()
-    .filter(c => c !== undefined && c !== null) as parse.LcovFile[]
-  return getLineCoverage(coverages)
+): LineCoverage {
+  return getLineCoverage(getProjectCoverage(projects, 'coverageBefore'))
+}
+
+function getProjectCoverage(
+  projects: CoveredProject[],
+  coverageKey: keyof Pick<CoveredProject, 'coverage' | 'coverageBefore'>
+): SectionSummary[] {
+  const coverages: SectionSummary[] = []
+  for (const project of projects) {
+    const coverage = project[coverageKey]
+    if (!coverage) {
+      continue
+    }
+    for (const sections of coverage) {
+      coverages.push(sections)
+    }
+  }
+
+  return coverages
 }
