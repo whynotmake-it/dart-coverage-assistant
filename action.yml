@@ -2,6 +2,10 @@ name: "Dart Coverage Assistant"
 description: "Magically generates code coverage for all your dart projects."
 author: "whynotmake.it"
 
+branding:
+  icon: "bar-chart"
+  color: "green"
+
 # Define your inputs here.
 inputs:
   GITHUB_TOKEN:
