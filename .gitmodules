@@ -1,0 +1,3 @@
+[submodule "submodules/create-pull-request"]
+	path = submodules/create-pull-request
+	url = git@github.com:peter-evans/create-pull-request.git
