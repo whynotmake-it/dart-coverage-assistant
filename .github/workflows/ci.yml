@@ -8,6 +8,9 @@ on:
       - 'releases/*'
 
 jobs:
+  semantic_pull_request:
+    uses: VeryGoodOpenSource/very_good_workflows/.github/workflows/semantic_pull_request.yml@v1
+
   test-typescript:
     name: TypeScript Tests
     runs-on: ubuntu-latest
