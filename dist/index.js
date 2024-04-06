@@ -13857,21 +13857,8 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.commitAndPushChanges = exports.popStash = exports.checkoutRef = exports.stashChanges = exports.configureGit = void 0;
+exports.getChanges = exports.popStash = exports.checkoutRef = exports.stashChanges = void 0;
 const exec = __importStar(__nccwpck_require__(1514));
-const github_1 = __nccwpck_require__(5438);
-const config_1 = __nccwpck_require__(6373);
-async function configureGit() {
-    await exec.exec('git', ['config', 'user.name', 'github-actions[bot]']);
-    await exec.exec('git', [
-        'config',
-        'user.email',
-        'github-actions[bot]@users.noreply.github.com'
-    ]);
-    const url = `https://x-access-token:${config_1.Config.githubToken}@github.com/${github_1.context.payload.repository?.full_name}`;
-    await exec.exec('git', ['remote', 'set-url', 'origin', url]);
-}
-exports.configureGit = configureGit;
 async function stashChanges() {
     await exec.exec('git', ['stash']);
 }
@@ -13891,12 +13878,22 @@ async function popStash() {
     }
 }
 exports.popStash = popStash;
-async function commitAndPushChanges(commitMessage) {
-    await exec.exec('git', ['add', '.']);
-    await exec.exec('git', ['commit', '-am', commitMessage]);
-    await exec.exec('git', ['push', 'origin']);
+/**
+ *
+ * @returns the changes in the current branch as a string
+ */
+async function getChanges() {
+    let changes = '';
+    await exec.exec('git', ['diff', '--name-only'], {
+        listeners: {
+            stdout: (data) => {
+                changes += data.toString();
+            }
+        }
+    });
+    return changes;
 }
-exports.commitAndPushChanges = commitAndPushChanges;
+exports.getChanges = getChanges;
 
 
 /***/ }),
@@ -14080,11 +14077,8 @@ async function run() {
         // If we are in a Push event and generateBadges is true, generate badges
         if (config_1.Config.generateBadges && github_1.context.eventName === 'push') {
             try {
-                core.info(`Configuring git...`);
-                await (0, git_1.configureGit)();
                 core.info('Updating and pushing coverage badge...');
                 await (0, badge_1.generateBadges)(coveredProjects);
-                await (0, git_1.commitAndPushChanges)('chore: coverage badges [skip ci]');
             }
             catch (error) {
                 core.warning(`Failed to commit and push coverage badge due to ${error}.`);

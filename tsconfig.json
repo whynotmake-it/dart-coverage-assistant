@@ -4,9 +4,10 @@
     "module": "commonjs",
     "outDir": "./lib",
     "rootDir": "./src",
+    "declaration": true,
     "strict": true,
-    "noImplicitAny": true,
+    "noImplicitAny": false,
     "esModuleInterop": true
   },
-  "exclude": ["node_modules", "**/*.test.ts"]
+  "exclude": ["node_modules", "**/*.test.ts", "submodules/**/*"]
 }
