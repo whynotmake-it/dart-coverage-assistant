@@ -4,12 +4,7 @@ import { generateBadges } from './badge'
 import { createComment, findPreviousComment, updateComment } from './comment'
 import { Config } from './config'
 import { findProjects } from './finder'
-import {
-  checkoutRef,
-  getChanges,
-  popStash,
-  stashChanges
-} from './git'
+import { checkoutRef, getChanges, popStash, stashChanges } from './git'
 import { coverProject, parseLcovBefore } from './lcov'
 import { buildMessage } from './message'
 import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor'
@@ -61,7 +56,6 @@ export async function run(): Promise<void> {
         } else {
           core.info('No changes to commit.')
         }
-
       } catch (error) {
         core.warning(
           `Failed to commit and push coverage badge due to ${error}.`

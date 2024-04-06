@@ -20865,27 +20865,28 @@ function createPr(changes, coveredProjects) {
         gitToken: config_1.Config.githubToken,
         path: (0, core_1.getInput)('$GITHUB_WORKSPACE'),
         addPaths: [],
-        commitMessage: "chore: update coverage",
-        committer: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>",
-        author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>",
+        commitMessage: 'chore: update coverage',
+        committer: 'github-actions[bot] <github-actions[bot]@users.noreply.github.com>',
+        author: 'github-actions[bot] <github-actions[bot]@users.noreply.github.com>',
         signoff: false,
-        branch: "chore/update-coverage",
+        branch: 'chore/update-coverage',
         deleteBranch: true,
-        branchSuffix: "",
-        base: "",
-        pushToFork: "",
-        title: "chore: update coverage",
+        branchSuffix: '',
+        base: '',
+        pushToFork: '',
+        title: 'chore: update coverage',
         body: buildPrMessage(coveredProjects),
-        bodyPath: "",
+        bodyPath: '',
         labels: [],
         assignees: [],
         reviewers: [],
         teamReviewers: [],
-        milestone: Number(""),
-        draft: false,
+        milestone: Number(''),
+        draft: false
     });
 }
 exports.createPr = createPr;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function buildPrMessage(coveredProjects) {
     // Get current commit from push event
     const sha = github_1.context.sha;
