@@ -8596,6 +8596,241 @@ exports.AbortError = AbortError;
 
 /***/ }),
 
+/***/ 9690:
+/***/ (function(module, __unused_webpack_exports, __nccwpck_require__) {
+
+"use strict";
+
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+const events_1 = __nccwpck_require__(2361);
+const debug_1 = __importDefault(__nccwpck_require__(8237));
+const promisify_1 = __importDefault(__nccwpck_require__(6570));
+const debug = debug_1.default('agent-base');
+function isAgent(v) {
+    return Boolean(v) && typeof v.addRequest === 'function';
+}
+function isSecureEndpoint() {
+    const { stack } = new Error();
+    if (typeof stack !== 'string')
+        return false;
+    return stack.split('\n').some(l => l.indexOf('(https.js:') !== -1 || l.indexOf('node:https:') !== -1);
+}
+function createAgent(callback, opts) {
+    return new createAgent.Agent(callback, opts);
+}
+(function (createAgent) {
+    /**
+     * Base `http.Agent` implementation.
+     * No pooling/keep-alive is implemented by default.
+     *
+     * @param {Function} callback
+     * @api public
+     */
+    class Agent extends events_1.EventEmitter {
+        constructor(callback, _opts) {
+            super();
+            let opts = _opts;
+            if (typeof callback === 'function') {
+                this.callback = callback;
+            }
+            else if (callback) {
+                opts = callback;
+            }
+            // Timeout for the socket to be returned from the callback
+            this.timeout = null;
+            if (opts && typeof opts.timeout === 'number') {
+                this.timeout = opts.timeout;
+            }
+            // These aren't actually used by `agent-base`, but are required
+            // for the TypeScript definition files in `@types/node` :/
+            this.maxFreeSockets = 1;
+            this.maxSockets = 1;
+            this.maxTotalSockets = Infinity;
+            this.sockets = {};
+            this.freeSockets = {};
+            this.requests = {};
+            this.options = {};
+        }
+        get defaultPort() {
+            if (typeof this.explicitDefaultPort === 'number') {
+                return this.explicitDefaultPort;
+            }
+            return isSecureEndpoint() ? 443 : 80;
+        }
+        set defaultPort(v) {
+            this.explicitDefaultPort = v;
+        }
+        get protocol() {
+            if (typeof this.explicitProtocol === 'string') {
+                return this.explicitProtocol;
+            }
+            return isSecureEndpoint() ? 'https:' : 'http:';
+        }
+        set protocol(v) {
+            this.explicitProtocol = v;
+        }
+        callback(req, opts, fn) {
+            throw new Error('"agent-base" has no default implementation, you must subclass and override `callback()`');
+        }
+        /**
+         * Called by node-core's "_http_client.js" module when creating
+         * a new HTTP request with this Agent instance.
+         *
+         * @api public
+         */
+        addRequest(req, _opts) {
+            const opts = Object.assign({}, _opts);
+            if (typeof opts.secureEndpoint !== 'boolean') {
+                opts.secureEndpoint = isSecureEndpoint();
+            }
+            if (opts.host == null) {
+                opts.host = 'localhost';
+            }
+            if (opts.port == null) {
+                opts.port = opts.secureEndpoint ? 443 : 80;
+            }
+            if (opts.protocol == null) {
+                opts.protocol = opts.secureEndpoint ? 'https:' : 'http:';
+            }
+            if (opts.host && opts.path) {
+                // If both a `host` and `path` are specified then it's most
+                // likely the result of a `url.parse()` call... we need to
+                // remove the `path` portion so that `net.connect()` doesn't
+                // attempt to open that as a unix socket file.
+                delete opts.path;
+            }
+            delete opts.agent;
+            delete opts.hostname;
+            delete opts._defaultAgent;
+            delete opts.defaultPort;
+            delete opts.createConnection;
+            // Hint to use "Connection: close"
+            // XXX: non-documented `http` module API :(
+            req._last = true;
+            req.shouldKeepAlive = false;
+            let timedOut = false;
+            let timeoutId = null;
+            const timeoutMs = opts.timeout || this.timeout;
+            const onerror = (err) => {
+                if (req._hadError)
+                    return;
+                req.emit('error', err);
+                // For Safety. Some additional errors might fire later on
+                // and we need to make sure we don't double-fire the error event.
+                req._hadError = true;
+            };
+            const ontimeout = () => {
+                timeoutId = null;
+                timedOut = true;
+                const err = new Error(`A "socket" was not created for HTTP request before ${timeoutMs}ms`);
+                err.code = 'ETIMEOUT';
+                onerror(err);
+            };
+            const callbackError = (err) => {
+                if (timedOut)
+                    return;
+                if (timeoutId !== null) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                onerror(err);
+            };
+            const onsocket = (socket) => {
+                if (timedOut)
+                    return;
+                if (timeoutId != null) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                if (isAgent(socket)) {
+                    // `socket` is actually an `http.Agent` instance, so
+                    // relinquish responsibility for this `req` to the Agent
+                    // from here on
+                    debug('Callback returned another Agent instance %o', socket.constructor.name);
+                    socket.addRequest(req, opts);
+                    return;
+                }
+                if (socket) {
+                    socket.once('free', () => {
+                        this.freeSocket(socket, opts);
+                    });
+                    req.onSocket(socket);
+                    return;
+                }
+                const err = new Error(`no Duplex stream was returned to agent-base for \`${req.method} ${req.path}\``);
+                onerror(err);
+            };
+            if (typeof this.callback !== 'function') {
+                onerror(new Error('`callback` is not defined'));
+                return;
+            }
+            if (!this.promisifiedCallback) {
+                if (this.callback.length >= 3) {
+                    debug('Converting legacy callback function to promise');
+                    this.promisifiedCallback = promisify_1.default(this.callback);
+                }
+                else {
+                    this.promisifiedCallback = this.callback;
+                }
+            }
+            if (typeof timeoutMs === 'number' && timeoutMs > 0) {
+                timeoutId = setTimeout(ontimeout, timeoutMs);
+            }
+            if ('port' in opts && typeof opts.port !== 'number') {
+                opts.port = Number(opts.port);
+            }
+            try {
+                debug('Resolving socket for %o request: %o', opts.protocol, `${req.method} ${req.path}`);
+                Promise.resolve(this.promisifiedCallback(req, opts)).then(onsocket, callbackError);
+            }
+            catch (err) {
+                Promise.reject(err).catch(callbackError);
+            }
+        }
+        freeSocket(socket, opts) {
+            debug('Freeing socket %o %o', socket.constructor.name, opts);
+            socket.destroy();
+        }
+        destroy() {
+            debug('Destroying agent %o', this.constructor.name);
+        }
+    }
+    createAgent.Agent = Agent;
+    // So that `instanceof` works correctly
+    createAgent.prototype = createAgent.Agent.prototype;
+})(createAgent || (createAgent = {}));
+module.exports = createAgent;
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 6570:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+function promisify(fn) {
+    return function (req, opts) {
+        return new Promise((resolve, reject) => {
+            fn.call(this, req, opts, (err, rtn) => {
+                if (err) {
+                    reject(err);
+                }
+                else {
+                    resolve(rtn);
+                }
+            });
+        });
+    };
+}
+exports["default"] = promisify;
+//# sourceMappingURL=promisify.js.map
+
+/***/ }),
+
 /***/ 9417:
 /***/ ((module) => {
 
@@ -9075,6 +9310,850 @@ var isArray = Array.isArray || function (xs) {
 
 /***/ }),
 
+/***/ 8222:
+/***/ ((module, exports, __nccwpck_require__) => {
+
+/* eslint-env browser */
+
+/**
+ * This is the web browser implementation of `debug()`.
+ */
+
+exports.formatArgs = formatArgs;
+exports.save = save;
+exports.load = load;
+exports.useColors = useColors;
+exports.storage = localstorage();
+exports.destroy = (() => {
+	let warned = false;
+
+	return () => {
+		if (!warned) {
+			warned = true;
+			console.warn('Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`.');
+		}
+	};
+})();
+
+/**
+ * Colors.
+ */
+
+exports.colors = [
+	'#0000CC',
+	'#0000FF',
+	'#0033CC',
+	'#0033FF',
+	'#0066CC',
+	'#0066FF',
+	'#0099CC',
+	'#0099FF',
+	'#00CC00',
+	'#00CC33',
+	'#00CC66',
+	'#00CC99',
+	'#00CCCC',
+	'#00CCFF',
+	'#3300CC',
+	'#3300FF',
+	'#3333CC',
+	'#3333FF',
+	'#3366CC',
+	'#3366FF',
+	'#3399CC',
+	'#3399FF',
+	'#33CC00',
+	'#33CC33',
+	'#33CC66',
+	'#33CC99',
+	'#33CCCC',
+	'#33CCFF',
+	'#6600CC',
+	'#6600FF',
+	'#6633CC',
+	'#6633FF',
+	'#66CC00',
+	'#66CC33',
+	'#9900CC',
+	'#9900FF',
+	'#9933CC',
+	'#9933FF',
+	'#99CC00',
+	'#99CC33',
+	'#CC0000',
+	'#CC0033',
+	'#CC0066',
+	'#CC0099',
+	'#CC00CC',
+	'#CC00FF',
+	'#CC3300',
+	'#CC3333',
+	'#CC3366',
+	'#CC3399',
+	'#CC33CC',
+	'#CC33FF',
+	'#CC6600',
+	'#CC6633',
+	'#CC9900',
+	'#CC9933',
+	'#CCCC00',
+	'#CCCC33',
+	'#FF0000',
+	'#FF0033',
+	'#FF0066',
+	'#FF0099',
+	'#FF00CC',
+	'#FF00FF',
+	'#FF3300',
+	'#FF3333',
+	'#FF3366',
+	'#FF3399',
+	'#FF33CC',
+	'#FF33FF',
+	'#FF6600',
+	'#FF6633',
+	'#FF9900',
+	'#FF9933',
+	'#FFCC00',
+	'#FFCC33'
+];
+
+/**
+ * Currently only WebKit-based Web Inspectors, Firefox >= v31,
+ * and the Firebug extension (any Firefox version) are known
+ * to support "%c" CSS customizations.
+ *
+ * TODO: add a `localStorage` variable to explicitly enable/disable colors
+ */
+
+// eslint-disable-next-line complexity
+function useColors() {
+	// NB: In an Electron preload script, document will be defined but not fully
+	// initialized. Since we know we're in Chrome, we'll just detect this case
+	// explicitly
+	if (typeof window !== 'undefined' && window.process && (window.process.type === 'renderer' || window.process.__nwjs)) {
+		return true;
+	}
+
+	// Internet Explorer and Edge do not support colors.
+	if (typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/(edge|trident)\/(\d+)/)) {
+		return false;
+	}
+
+	// Is webkit? http://stackoverflow.com/a/16459606/376773
+	// document is undefined in react-native: https://github.com/facebook/react-native/pull/1632
+	return (typeof document !== 'undefined' && document.documentElement && document.documentElement.style && document.documentElement.style.WebkitAppearance) ||
+		// Is firebug? http://stackoverflow.com/a/398120/376773
+		(typeof window !== 'undefined' && window.console && (window.console.firebug || (window.console.exception && window.console.table))) ||
+		// Is firefox >= v31?
+		// https://developer.mozilla.org/en-US/docs/Tools/Web_Console#Styling_messages
+		(typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/firefox\/(\d+)/) && parseInt(RegExp.$1, 10) >= 31) ||
+		// Double check webkit in userAgent just in case we are in a worker
+		(typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/applewebkit\/(\d+)/));
+}
+
+/**
+ * Colorize log arguments if enabled.
+ *
+ * @api public
+ */
+
+function formatArgs(args) {
+	args[0] = (this.useColors ? '%c' : '') +
+		this.namespace +
+		(this.useColors ? ' %c' : ' ') +
+		args[0] +
+		(this.useColors ? '%c ' : ' ') +
+		'+' + module.exports.humanize(this.diff);
+
+	if (!this.useColors) {
+		return;
+	}
+
+	const c = 'color: ' + this.color;
+	args.splice(1, 0, c, 'color: inherit');
+
+	// The final "%c" is somewhat tricky, because there could be other
+	// arguments passed either before or after the %c, so we need to
+	// figure out the correct index to insert the CSS into
+	let index = 0;
+	let lastC = 0;
+	args[0].replace(/%[a-zA-Z%]/g, match => {
+		if (match === '%%') {
+			return;
+		}
+		index++;
+		if (match === '%c') {
+			// We only are interested in the *last* %c
+			// (the user may have provided their own)
+			lastC = index;
+		}
+	});
+
+	args.splice(lastC, 0, c);
+}
+
+/**
+ * Invokes `console.debug()` when available.
+ * No-op when `console.debug` is not a "function".
+ * If `console.debug` is not available, falls back
+ * to `console.log`.
+ *
+ * @api public
+ */
+exports.log = console.debug || console.log || (() => {});
+
+/**
+ * Save `namespaces`.
+ *
+ * @param {String} namespaces
+ * @api private
+ */
+function save(namespaces) {
+	try {
+		if (namespaces) {
+			exports.storage.setItem('debug', namespaces);
+		} else {
+			exports.storage.removeItem('debug');
+		}
+	} catch (error) {
+		// Swallow
+		// XXX (@Qix-) should we be logging these?
+	}
+}
+
+/**
+ * Load `namespaces`.
+ *
+ * @return {String} returns the previously persisted debug modes
+ * @api private
+ */
+function load() {
+	let r;
+	try {
+		r = exports.storage.getItem('debug');
+	} catch (error) {
+		// Swallow
+		// XXX (@Qix-) should we be logging these?
+	}
+
+	// If debug isn't set in LS, and we're in Electron, try to load $DEBUG
+	if (!r && typeof process !== 'undefined' && 'env' in process) {
+		r = process.env.DEBUG;
+	}
+
+	return r;
+}
+
+/**
+ * Localstorage attempts to return the localstorage.
+ *
+ * This is necessary because safari throws
+ * when a user disables cookies/localstorage
+ * and you attempt to access it.
+ *
+ * @return {LocalStorage}
+ * @api private
+ */
+
+function localstorage() {
+	try {
+		// TVMLKit (Apple TV JS Runtime) does not have a window object, just localStorage in the global context
+		// The Browser also has localStorage in the global context.
+		return localStorage;
+	} catch (error) {
+		// Swallow
+		// XXX (@Qix-) should we be logging these?
+	}
+}
+
+module.exports = __nccwpck_require__(6243)(exports);
+
+const {formatters} = module.exports;
+
+/**
+ * Map %j to `JSON.stringify()`, since no Web Inspectors do that by default.
+ */
+
+formatters.j = function (v) {
+	try {
+		return JSON.stringify(v);
+	} catch (error) {
+		return '[UnexpectedJSONParseError]: ' + error.message;
+	}
+};
+
+
+/***/ }),
+
+/***/ 6243:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+/**
+ * This is the common logic for both the Node.js and web browser
+ * implementations of `debug()`.
+ */
+
+function setup(env) {
+	createDebug.debug = createDebug;
+	createDebug.default = createDebug;
+	createDebug.coerce = coerce;
+	createDebug.disable = disable;
+	createDebug.enable = enable;
+	createDebug.enabled = enabled;
+	createDebug.humanize = __nccwpck_require__(900);
+	createDebug.destroy = destroy;
+
+	Object.keys(env).forEach(key => {
+		createDebug[key] = env[key];
+	});
+
+	/**
+	* The currently active debug mode names, and names to skip.
+	*/
+
+	createDebug.names = [];
+	createDebug.skips = [];
+
+	/**
+	* Map of special "%n" handling functions, for the debug "format" argument.
+	*
+	* Valid key names are a single, lower or upper-case letter, i.e. "n" and "N".
+	*/
+	createDebug.formatters = {};
+
+	/**
+	* Selects a color for a debug namespace
+	* @param {String} namespace The namespace string for the debug instance to be colored
+	* @return {Number|String} An ANSI color code for the given namespace
+	* @api private
+	*/
+	function selectColor(namespace) {
+		let hash = 0;
+
+		for (let i = 0; i < namespace.length; i++) {
+			hash = ((hash << 5) - hash) + namespace.charCodeAt(i);
+			hash |= 0; // Convert to 32bit integer
+		}
+
+		return createDebug.colors[Math.abs(hash) % createDebug.colors.length];
+	}
+	createDebug.selectColor = selectColor;
+
+	/**
+	* Create a debugger with the given `namespace`.
+	*
+	* @param {String} namespace
+	* @return {Function}
+	* @api public
+	*/
+	function createDebug(namespace) {
+		let prevTime;
+		let enableOverride = null;
+		let namespacesCache;
+		let enabledCache;
+
+		function debug(...args) {
+			// Disabled?
+			if (!debug.enabled) {
+				return;
+			}
+
+			const self = debug;
+
+			// Set `diff` timestamp
+			const curr = Number(new Date());
+			const ms = curr - (prevTime || curr);
+			self.diff = ms;
+			self.prev = prevTime;
+			self.curr = curr;
+			prevTime = curr;
+
+			args[0] = createDebug.coerce(args[0]);
+
+			if (typeof args[0] !== 'string') {
+				// Anything else let's inspect with %O
+				args.unshift('%O');
+			}
+
+			// Apply any `formatters` transformations
+			let index = 0;
+			args[0] = args[0].replace(/%([a-zA-Z%])/g, (match, format) => {
+				// If we encounter an escaped % then don't increase the array index
+				if (match === '%%') {
+					return '%';
+				}
+				index++;
+				const formatter = createDebug.formatters[format];
+				if (typeof formatter === 'function') {
+					const val = args[index];
+					match = formatter.call(self, val);
+
+					// Now we need to remove `args[index]` since it's inlined in the `format`
+					args.splice(index, 1);
+					index--;
+				}
+				return match;
+			});
+
+			// Apply env-specific formatting (colors, etc.)
+			createDebug.formatArgs.call(self, args);
+
+			const logFn = self.log || createDebug.log;
+			logFn.apply(self, args);
+		}
+
+		debug.namespace = namespace;
+		debug.useColors = createDebug.useColors();
+		debug.color = createDebug.selectColor(namespace);
+		debug.extend = extend;
+		debug.destroy = createDebug.destroy; // XXX Temporary. Will be removed in the next major release.
+
+		Object.defineProperty(debug, 'enabled', {
+			enumerable: true,
+			configurable: false,
+			get: () => {
+				if (enableOverride !== null) {
+					return enableOverride;
+				}
+				if (namespacesCache !== createDebug.namespaces) {
+					namespacesCache = createDebug.namespaces;
+					enabledCache = createDebug.enabled(namespace);
+				}
+
+				return enabledCache;
+			},
+			set: v => {
+				enableOverride = v;
+			}
+		});
+
+		// Env-specific initialization logic for debug instances
+		if (typeof createDebug.init === 'function') {
+			createDebug.init(debug);
+		}
+
+		return debug;
+	}
+
+	function extend(namespace, delimiter) {
+		const newDebug = createDebug(this.namespace + (typeof delimiter === 'undefined' ? ':' : delimiter) + namespace);
+		newDebug.log = this.log;
+		return newDebug;
+	}
+
+	/**
+	* Enables a debug mode by namespaces. This can include modes
+	* separated by a colon and wildcards.
+	*
+	* @param {String} namespaces
+	* @api public
+	*/
+	function enable(namespaces) {
+		createDebug.save(namespaces);
+		createDebug.namespaces = namespaces;
+
+		createDebug.names = [];
+		createDebug.skips = [];
+
+		let i;
+		const split = (typeof namespaces === 'string' ? namespaces : '').split(/[\s,]+/);
+		const len = split.length;
+
+		for (i = 0; i < len; i++) {
+			if (!split[i]) {
+				// ignore empty strings
+				continue;
+			}
+
+			namespaces = split[i].replace(/\*/g, '.*?');
+
+			if (namespaces[0] === '-') {
+				createDebug.skips.push(new RegExp('^' + namespaces.slice(1) + '$'));
+			} else {
+				createDebug.names.push(new RegExp('^' + namespaces + '$'));
+			}
+		}
+	}
+
+	/**
+	* Disable debug output.
+	*
+	* @return {String} namespaces
+	* @api public
+	*/
+	function disable() {
+		const namespaces = [
+			...createDebug.names.map(toNamespace),
+			...createDebug.skips.map(toNamespace).map(namespace => '-' + namespace)
+		].join(',');
+		createDebug.enable('');
+		return namespaces;
+	}
+
+	/**
+	* Returns true if the given mode name is enabled, false otherwise.
+	*
+	* @param {String} name
+	* @return {Boolean}
+	* @api public
+	*/
+	function enabled(name) {
+		if (name[name.length - 1] === '*') {
+			return true;
+		}
+
+		let i;
+		let len;
+
+		for (i = 0, len = createDebug.skips.length; i < len; i++) {
+			if (createDebug.skips[i].test(name)) {
+				return false;
+			}
+		}
+
+		for (i = 0, len = createDebug.names.length; i < len; i++) {
+			if (createDebug.names[i].test(name)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	* Convert regexp to namespace
+	*
+	* @param {RegExp} regxep
+	* @return {String} namespace
+	* @api private
+	*/
+	function toNamespace(regexp) {
+		return regexp.toString()
+			.substring(2, regexp.toString().length - 2)
+			.replace(/\.\*\?$/, '*');
+	}
+
+	/**
+	* Coerce `val`.
+	*
+	* @param {Mixed} val
+	* @return {Mixed}
+	* @api private
+	*/
+	function coerce(val) {
+		if (val instanceof Error) {
+			return val.stack || val.message;
+		}
+		return val;
+	}
+
+	/**
+	* XXX DO NOT USE. This is a temporary stub function.
+	* XXX It WILL be removed in the next major release.
+	*/
+	function destroy() {
+		console.warn('Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`.');
+	}
+
+	createDebug.enable(createDebug.load());
+
+	return createDebug;
+}
+
+module.exports = setup;
+
+
+/***/ }),
+
+/***/ 8237:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+/**
+ * Detect Electron renderer / nwjs process, which is node, but we should
+ * treat as a browser.
+ */
+
+if (typeof process === 'undefined' || process.type === 'renderer' || process.browser === true || process.__nwjs) {
+	module.exports = __nccwpck_require__(8222);
+} else {
+	module.exports = __nccwpck_require__(4874);
+}
+
+
+/***/ }),
+
+/***/ 4874:
+/***/ ((module, exports, __nccwpck_require__) => {
+
+/**
+ * Module dependencies.
+ */
+
+const tty = __nccwpck_require__(6224);
+const util = __nccwpck_require__(3837);
+
+/**
+ * This is the Node.js implementation of `debug()`.
+ */
+
+exports.init = init;
+exports.log = log;
+exports.formatArgs = formatArgs;
+exports.save = save;
+exports.load = load;
+exports.useColors = useColors;
+exports.destroy = util.deprecate(
+	() => {},
+	'Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`.'
+);
+
+/**
+ * Colors.
+ */
+
+exports.colors = [6, 2, 3, 4, 5, 1];
+
+try {
+	// Optional dependency (as in, doesn't need to be installed, NOT like optionalDependencies in package.json)
+	// eslint-disable-next-line import/no-extraneous-dependencies
+	const supportsColor = __nccwpck_require__(9318);
+
+	if (supportsColor && (supportsColor.stderr || supportsColor).level >= 2) {
+		exports.colors = [
+			20,
+			21,
+			26,
+			27,
+			32,
+			33,
+			38,
+			39,
+			40,
+			41,
+			42,
+			43,
+			44,
+			45,
+			56,
+			57,
+			62,
+			63,
+			68,
+			69,
+			74,
+			75,
+			76,
+			77,
+			78,
+			79,
+			80,
+			81,
+			92,
+			93,
+			98,
+			99,
+			112,
+			113,
+			128,
+			129,
+			134,
+			135,
+			148,
+			149,
+			160,
+			161,
+			162,
+			163,
+			164,
+			165,
+			166,
+			167,
+			168,
+			169,
+			170,
+			171,
+			172,
+			173,
+			178,
+			179,
+			184,
+			185,
+			196,
+			197,
+			198,
+			199,
+			200,
+			201,
+			202,
+			203,
+			204,
+			205,
+			206,
+			207,
+			208,
+			209,
+			214,
+			215,
+			220,
+			221
+		];
+	}
+} catch (error) {
+	// Swallow - we only care if `supports-color` is available; it doesn't have to be.
+}
+
+/**
+ * Build up the default `inspectOpts` object from the environment variables.
+ *
+ *   $ DEBUG_COLORS=no DEBUG_DEPTH=10 DEBUG_SHOW_HIDDEN=enabled node script.js
+ */
+
+exports.inspectOpts = Object.keys(process.env).filter(key => {
+	return /^debug_/i.test(key);
+}).reduce((obj, key) => {
+	// Camel-case
+	const prop = key
+		.substring(6)
+		.toLowerCase()
+		.replace(/_([a-z])/g, (_, k) => {
+			return k.toUpperCase();
+		});
+
+	// Coerce string value into JS value
+	let val = process.env[key];
+	if (/^(yes|on|true|enabled)$/i.test(val)) {
+		val = true;
+	} else if (/^(no|off|false|disabled)$/i.test(val)) {
+		val = false;
+	} else if (val === 'null') {
+		val = null;
+	} else {
+		val = Number(val);
+	}
+
+	obj[prop] = val;
+	return obj;
+}, {});
+
+/**
+ * Is stdout a TTY? Colored output is enabled when `true`.
+ */
+
+function useColors() {
+	return 'colors' in exports.inspectOpts ?
+		Boolean(exports.inspectOpts.colors) :
+		tty.isatty(process.stderr.fd);
+}
+
+/**
+ * Adds ANSI color escape codes if enabled.
+ *
+ * @api public
+ */
+
+function formatArgs(args) {
+	const {namespace: name, useColors} = this;
+
+	if (useColors) {
+		const c = this.color;
+		const colorCode = '\u001B[3' + (c < 8 ? c : '8;5;' + c);
+		const prefix = `  ${colorCode};1m${name} \u001B[0m`;
+
+		args[0] = prefix + args[0].split('\n').join('\n' + prefix);
+		args.push(colorCode + 'm+' + module.exports.humanize(this.diff) + '\u001B[0m');
+	} else {
+		args[0] = getDate() + name + ' ' + args[0];
+	}
+}
+
+function getDate() {
+	if (exports.inspectOpts.hideDate) {
+		return '';
+	}
+	return new Date().toISOString() + ' ';
+}
+
+/**
+ * Invokes `util.format()` with the specified arguments and writes to stderr.
+ */
+
+function log(...args) {
+	return process.stderr.write(util.format(...args) + '\n');
+}
+
+/**
+ * Save `namespaces`.
+ *
+ * @param {String} namespaces
+ * @api private
+ */
+function save(namespaces) {
+	if (namespaces) {
+		process.env.DEBUG = namespaces;
+	} else {
+		// If you set a process.env field to null or undefined, it gets cast to the
+		// string 'null' or 'undefined'. Just delete instead.
+		delete process.env.DEBUG;
+	}
+}
+
+/**
+ * Load `namespaces`.
+ *
+ * @return {String} returns the previously persisted debug modes
+ * @api private
+ */
+
+function load() {
+	return process.env.DEBUG;
+}
+
+/**
+ * Init logic for `debug` instances.
+ *
+ * Create a new `inspectOpts` object in case `useColors` is set
+ * differently for a particular `debug` instance.
+ */
+
+function init(debug) {
+	debug.inspectOpts = {};
+
+	const keys = Object.keys(exports.inspectOpts);
+	for (let i = 0; i < keys.length; i++) {
+		debug.inspectOpts[keys[i]] = exports.inspectOpts[keys[i]];
+	}
+}
+
+module.exports = __nccwpck_require__(6243)(exports);
+
+const {formatters} = module.exports;
+
+/**
+ * Map %o to `util.inspect()`, all on a single line.
+ */
+
+formatters.o = function (v) {
+	this.inspectOpts.colors = this.useColors;
+	return util.inspect(v, this.inspectOpts)
+		.split('\n')
+		.map(str => str.trim())
+		.join(' ');
+};
+
+/**
+ * Map %O to `util.inspect()`, allowing multiple lines if needed.
+ */
+
+formatters.O = function (v) {
+	this.inspectOpts.colors = this.useColors;
+	return util.inspect(v, this.inspectOpts);
+};
+
+
+/***/ }),
+
 /***/ 8932:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -9100,6 +10179,300 @@ class Deprecation extends Error {
 
 exports.Deprecation = Deprecation;
 
+
+/***/ }),
+
+/***/ 1621:
+/***/ ((module) => {
+
+"use strict";
+
+
+module.exports = (flag, argv = process.argv) => {
+	const prefix = flag.startsWith('-') ? '' : (flag.length === 1 ? '-' : '--');
+	const position = argv.indexOf(prefix + flag);
+	const terminatorPosition = argv.indexOf('--');
+	return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
+};
+
+
+/***/ }),
+
+/***/ 5098:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const net_1 = __importDefault(__nccwpck_require__(1808));
+const tls_1 = __importDefault(__nccwpck_require__(4404));
+const url_1 = __importDefault(__nccwpck_require__(7310));
+const assert_1 = __importDefault(__nccwpck_require__(9491));
+const debug_1 = __importDefault(__nccwpck_require__(8237));
+const agent_base_1 = __nccwpck_require__(9690);
+const parse_proxy_response_1 = __importDefault(__nccwpck_require__(595));
+const debug = debug_1.default('https-proxy-agent:agent');
+/**
+ * The `HttpsProxyAgent` implements an HTTP Agent subclass that connects to
+ * the specified "HTTP(s) proxy server" in order to proxy HTTPS requests.
+ *
+ * Outgoing HTTP requests are first tunneled through the proxy server using the
+ * `CONNECT` HTTP request method to establish a connection to the proxy server,
+ * and then the proxy server connects to the destination target and issues the
+ * HTTP request from the proxy server.
+ *
+ * `https:` requests have their socket connection upgraded to TLS once
+ * the connection to the proxy server has been established.
+ *
+ * @api public
+ */
+class HttpsProxyAgent extends agent_base_1.Agent {
+    constructor(_opts) {
+        let opts;
+        if (typeof _opts === 'string') {
+            opts = url_1.default.parse(_opts);
+        }
+        else {
+            opts = _opts;
+        }
+        if (!opts) {
+            throw new Error('an HTTP(S) proxy server `host` and `port` must be specified!');
+        }
+        debug('creating new HttpsProxyAgent instance: %o', opts);
+        super(opts);
+        const proxy = Object.assign({}, opts);
+        // If `true`, then connect to the proxy server over TLS.
+        // Defaults to `false`.
+        this.secureProxy = opts.secureProxy || isHTTPS(proxy.protocol);
+        // Prefer `hostname` over `host`, and set the `port` if needed.
+        proxy.host = proxy.hostname || proxy.host;
+        if (typeof proxy.port === 'string') {
+            proxy.port = parseInt(proxy.port, 10);
+        }
+        if (!proxy.port && proxy.host) {
+            proxy.port = this.secureProxy ? 443 : 80;
+        }
+        // ALPN is supported by Node.js >= v5.
+        // attempt to negotiate http/1.1 for proxy servers that support http/2
+        if (this.secureProxy && !('ALPNProtocols' in proxy)) {
+            proxy.ALPNProtocols = ['http 1.1'];
+        }
+        if (proxy.host && proxy.path) {
+            // If both a `host` and `path` are specified then it's most likely
+            // the result of a `url.parse()` call... we need to remove the
+            // `path` portion so that `net.connect()` doesn't attempt to open
+            // that as a Unix socket file.
+            delete proxy.path;
+            delete proxy.pathname;
+        }
+        this.proxy = proxy;
+    }
+    /**
+     * Called when the node-core HTTP client library is creating a
+     * new HTTP request.
+     *
+     * @api protected
+     */
+    callback(req, opts) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { proxy, secureProxy } = this;
+            // Create a socket connection to the proxy server.
+            let socket;
+            if (secureProxy) {
+                debug('Creating `tls.Socket`: %o', proxy);
+                socket = tls_1.default.connect(proxy);
+            }
+            else {
+                debug('Creating `net.Socket`: %o', proxy);
+                socket = net_1.default.connect(proxy);
+            }
+            const headers = Object.assign({}, proxy.headers);
+            const hostname = `${opts.host}:${opts.port}`;
+            let payload = `CONNECT ${hostname} HTTP/1.1\r\n`;
+            // Inject the `Proxy-Authorization` header if necessary.
+            if (proxy.auth) {
+                headers['Proxy-Authorization'] = `Basic ${Buffer.from(proxy.auth).toString('base64')}`;
+            }
+            // The `Host` header should only include the port
+            // number when it is not the default port.
+            let { host, port, secureEndpoint } = opts;
+            if (!isDefaultPort(port, secureEndpoint)) {
+                host += `:${port}`;
+            }
+            headers.Host = host;
+            headers.Connection = 'close';
+            for (const name of Object.keys(headers)) {
+                payload += `${name}: ${headers[name]}\r\n`;
+            }
+            const proxyResponsePromise = parse_proxy_response_1.default(socket);
+            socket.write(`${payload}\r\n`);
+            const { statusCode, buffered } = yield proxyResponsePromise;
+            if (statusCode === 200) {
+                req.once('socket', resume);
+                if (opts.secureEndpoint) {
+                    // The proxy is connecting to a TLS server, so upgrade
+                    // this socket connection to a TLS connection.
+                    debug('Upgrading socket connection to TLS');
+                    const servername = opts.servername || opts.host;
+                    return tls_1.default.connect(Object.assign(Object.assign({}, omit(opts, 'host', 'hostname', 'path', 'port')), { socket,
+                        servername }));
+                }
+                return socket;
+            }
+            // Some other status code that's not 200... need to re-play the HTTP
+            // header "data" events onto the socket once the HTTP machinery is
+            // attached so that the node core `http` can parse and handle the
+            // error status code.
+            // Close the original socket, and a new "fake" socket is returned
+            // instead, so that the proxy doesn't get the HTTP request
+            // written to it (which may contain `Authorization` headers or other
+            // sensitive data).
+            //
+            // See: https://hackerone.com/reports/541502
+            socket.destroy();
+            const fakeSocket = new net_1.default.Socket({ writable: false });
+            fakeSocket.readable = true;
+            // Need to wait for the "socket" event to re-play the "data" events.
+            req.once('socket', (s) => {
+                debug('replaying proxy buffer for failed request');
+                assert_1.default(s.listenerCount('data') > 0);
+                // Replay the "buffered" Buffer onto the fake `socket`, since at
+                // this point the HTTP module machinery has been hooked up for
+                // the user.
+                s.push(buffered);
+                s.push(null);
+            });
+            return fakeSocket;
+        });
+    }
+}
+exports["default"] = HttpsProxyAgent;
+function resume(socket) {
+    socket.resume();
+}
+function isDefaultPort(port, secure) {
+    return Boolean((!secure && port === 80) || (secure && port === 443));
+}
+function isHTTPS(protocol) {
+    return typeof protocol === 'string' ? /^https:?$/i.test(protocol) : false;
+}
+function omit(obj, ...keys) {
+    const ret = {};
+    let key;
+    for (key in obj) {
+        if (!keys.includes(key)) {
+            ret[key] = obj[key];
+        }
+    }
+    return ret;
+}
+//# sourceMappingURL=agent.js.map
+
+/***/ }),
+
+/***/ 7219:
+/***/ (function(module, __unused_webpack_exports, __nccwpck_require__) {
+
+"use strict";
+
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+const agent_1 = __importDefault(__nccwpck_require__(5098));
+function createHttpsProxyAgent(opts) {
+    return new agent_1.default(opts);
+}
+(function (createHttpsProxyAgent) {
+    createHttpsProxyAgent.HttpsProxyAgent = agent_1.default;
+    createHttpsProxyAgent.prototype = agent_1.default.prototype;
+})(createHttpsProxyAgent || (createHttpsProxyAgent = {}));
+module.exports = createHttpsProxyAgent;
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 595:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const debug_1 = __importDefault(__nccwpck_require__(8237));
+const debug = debug_1.default('https-proxy-agent:parse-proxy-response');
+function parseProxyResponse(socket) {
+    return new Promise((resolve, reject) => {
+        // we need to buffer any HTTP traffic that happens with the proxy before we get
+        // the CONNECT response, so that if the response is anything other than an "200"
+        // response code, then we can re-play the "data" events on the socket once the
+        // HTTP parser is hooked up...
+        let buffersLength = 0;
+        const buffers = [];
+        function read() {
+            const b = socket.read();
+            if (b)
+                ondata(b);
+            else
+                socket.once('readable', read);
+        }
+        function cleanup() {
+            socket.removeListener('end', onend);
+            socket.removeListener('error', onerror);
+            socket.removeListener('close', onclose);
+            socket.removeListener('readable', read);
+        }
+        function onclose(err) {
+            debug('onclose had error %o', err);
+        }
+        function onend() {
+            debug('onend');
+        }
+        function onerror(err) {
+            cleanup();
+            debug('onerror %o', err);
+            reject(err);
+        }
+        function ondata(b) {
+            buffers.push(b);
+            buffersLength += b.length;
+            const buffered = Buffer.concat(buffers, buffersLength);
+            const endOfHeaders = buffered.indexOf('\r\n\r\n');
+            if (endOfHeaders === -1) {
+                // keep buffering
+                debug('have not received end of HTTP headers yet...');
+                read();
+                return;
+            }
+            const firstLine = buffered.toString('ascii', 0, buffered.indexOf('\r\n'));
+            const statusCode = +firstLine.split(' ')[1];
+            debug('got proxy server response: %o', firstLine);
+            resolve({
+                statusCode,
+                buffered
+            });
+        }
+        socket.on('error', onerror);
+        socket.on('close', onclose);
+        socket.on('end', onend);
+        read();
+    });
+}
+exports["default"] = parseProxyResponse;
+//# sourceMappingURL=parse-proxy-response.js.map
 
 /***/ }),
 
@@ -10236,6 +11609,175 @@ function regExpEscape (s) {
 
 /***/ }),
 
+/***/ 900:
+/***/ ((module) => {
+
+/**
+ * Helpers.
+ */
+
+var s = 1000;
+var m = s * 60;
+var h = m * 60;
+var d = h * 24;
+var w = d * 7;
+var y = d * 365.25;
+
+/**
+ * Parse or format the given `val`.
+ *
+ * Options:
+ *
+ *  - `long` verbose formatting [false]
+ *
+ * @param {String|Number} val
+ * @param {Object} [options]
+ * @throws {Error} throw an error if val is not a non-empty string or a number
+ * @return {String|Number}
+ * @api public
+ */
+
+module.exports = function(val, options) {
+  options = options || {};
+  var type = typeof val;
+  if (type === 'string' && val.length > 0) {
+    return parse(val);
+  } else if (type === 'number' && isFinite(val)) {
+    return options.long ? fmtLong(val) : fmtShort(val);
+  }
+  throw new Error(
+    'val is not a non-empty string or a valid number. val=' +
+      JSON.stringify(val)
+  );
+};
+
+/**
+ * Parse the given `str` and return milliseconds.
+ *
+ * @param {String} str
+ * @return {Number}
+ * @api private
+ */
+
+function parse(str) {
+  str = String(str);
+  if (str.length > 100) {
+    return;
+  }
+  var match = /^(-?(?:\d+)?\.?\d+) *(milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)?$/i.exec(
+    str
+  );
+  if (!match) {
+    return;
+  }
+  var n = parseFloat(match[1]);
+  var type = (match[2] || 'ms').toLowerCase();
+  switch (type) {
+    case 'years':
+    case 'year':
+    case 'yrs':
+    case 'yr':
+    case 'y':
+      return n * y;
+    case 'weeks':
+    case 'week':
+    case 'w':
+      return n * w;
+    case 'days':
+    case 'day':
+    case 'd':
+      return n * d;
+    case 'hours':
+    case 'hour':
+    case 'hrs':
+    case 'hr':
+    case 'h':
+      return n * h;
+    case 'minutes':
+    case 'minute':
+    case 'mins':
+    case 'min':
+    case 'm':
+      return n * m;
+    case 'seconds':
+    case 'second':
+    case 'secs':
+    case 'sec':
+    case 's':
+      return n * s;
+    case 'milliseconds':
+    case 'millisecond':
+    case 'msecs':
+    case 'msec':
+    case 'ms':
+      return n;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Short format for `ms`.
+ *
+ * @param {Number} ms
+ * @return {String}
+ * @api private
+ */
+
+function fmtShort(ms) {
+  var msAbs = Math.abs(ms);
+  if (msAbs >= d) {
+    return Math.round(ms / d) + 'd';
+  }
+  if (msAbs >= h) {
+    return Math.round(ms / h) + 'h';
+  }
+  if (msAbs >= m) {
+    return Math.round(ms / m) + 'm';
+  }
+  if (msAbs >= s) {
+    return Math.round(ms / s) + 's';
+  }
+  return ms + 'ms';
+}
+
+/**
+ * Long format for `ms`.
+ *
+ * @param {Number} ms
+ * @return {String}
+ * @api private
+ */
+
+function fmtLong(ms) {
+  var msAbs = Math.abs(ms);
+  if (msAbs >= d) {
+    return plural(ms, msAbs, d, 'day');
+  }
+  if (msAbs >= h) {
+    return plural(ms, msAbs, h, 'hour');
+  }
+  if (msAbs >= m) {
+    return plural(ms, msAbs, m, 'minute');
+  }
+  if (msAbs >= s) {
+    return plural(ms, msAbs, s, 'second');
+  }
+  return ms + ' ms';
+}
+
+/**
+ * Pluralization helper.
+ */
+
+function plural(ms, msAbs, n, name) {
+  var isPlural = msAbs >= n * 1.5;
+  return Math.round(ms / n) + ' ' + name + (isPlural ? 's' : '');
+}
+
+
+/***/ }),
+
 /***/ 1223:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -10281,6 +11823,265 @@ function onceStrict (fn) {
   f.called = false
   return f
 }
+
+
+/***/ }),
+
+/***/ 3329:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+var parseUrl = (__nccwpck_require__(7310).parse);
+
+var DEFAULT_PORTS = {
+  ftp: 21,
+  gopher: 70,
+  http: 80,
+  https: 443,
+  ws: 80,
+  wss: 443,
+};
+
+var stringEndsWith = String.prototype.endsWith || function(s) {
+  return s.length <= this.length &&
+    this.indexOf(s, this.length - s.length) !== -1;
+};
+
+/**
+ * @param {string|object} url - The URL, or the result from url.parse.
+ * @return {string} The URL of the proxy that should handle the request to the
+ *  given URL. If no proxy is set, this will be an empty string.
+ */
+function getProxyForUrl(url) {
+  var parsedUrl = typeof url === 'string' ? parseUrl(url) : url || {};
+  var proto = parsedUrl.protocol;
+  var hostname = parsedUrl.host;
+  var port = parsedUrl.port;
+  if (typeof hostname !== 'string' || !hostname || typeof proto !== 'string') {
+    return '';  // Don't proxy URLs without a valid scheme or host.
+  }
+
+  proto = proto.split(':', 1)[0];
+  // Stripping ports in this way instead of using parsedUrl.hostname to make
+  // sure that the brackets around IPv6 addresses are kept.
+  hostname = hostname.replace(/:\d*$/, '');
+  port = parseInt(port) || DEFAULT_PORTS[proto] || 0;
+  if (!shouldProxy(hostname, port)) {
+    return '';  // Don't proxy URLs that match NO_PROXY.
+  }
+
+  var proxy =
+    getEnv('npm_config_' + proto + '_proxy') ||
+    getEnv(proto + '_proxy') ||
+    getEnv('npm_config_proxy') ||
+    getEnv('all_proxy');
+  if (proxy && proxy.indexOf('://') === -1) {
+    // Missing scheme in proxy, default to the requested URL's scheme.
+    proxy = proto + '://' + proxy;
+  }
+  return proxy;
+}
+
+/**
+ * Determines whether a given URL should be proxied.
+ *
+ * @param {string} hostname - The host name of the URL.
+ * @param {number} port - The effective port of the URL.
+ * @returns {boolean} Whether the given URL should be proxied.
+ * @private
+ */
+function shouldProxy(hostname, port) {
+  var NO_PROXY =
+    (getEnv('npm_config_no_proxy') || getEnv('no_proxy')).toLowerCase();
+  if (!NO_PROXY) {
+    return true;  // Always proxy if NO_PROXY is not set.
+  }
+  if (NO_PROXY === '*') {
+    return false;  // Never proxy if wildcard is set.
+  }
+
+  return NO_PROXY.split(/[,\s]/).every(function(proxy) {
+    if (!proxy) {
+      return true;  // Skip zero-length hosts.
+    }
+    var parsedProxy = proxy.match(/^(.+):(\d+)$/);
+    var parsedProxyHostname = parsedProxy ? parsedProxy[1] : proxy;
+    var parsedProxyPort = parsedProxy ? parseInt(parsedProxy[2]) : 0;
+    if (parsedProxyPort && parsedProxyPort !== port) {
+      return true;  // Skip if ports don't match.
+    }
+
+    if (!/^[.*]/.test(parsedProxyHostname)) {
+      // No wildcards, so stop proxying if there is an exact match.
+      return hostname !== parsedProxyHostname;
+    }
+
+    if (parsedProxyHostname.charAt(0) === '*') {
+      // Remove leading wildcard.
+      parsedProxyHostname = parsedProxyHostname.slice(1);
+    }
+    // Stop proxying if the hostname ends with the no_proxy host.
+    return !stringEndsWith.call(hostname, parsedProxyHostname);
+  });
+}
+
+/**
+ * Get the value for an environment variable.
+ *
+ * @param {string} key - The name of the environment variable.
+ * @return {string} The value of the environment variable.
+ * @private
+ */
+function getEnv(key) {
+  return process.env[key.toLowerCase()] || process.env[key.toUpperCase()] || '';
+}
+
+exports.getProxyForUrl = getProxyForUrl;
+
+
+/***/ }),
+
+/***/ 9318:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+const os = __nccwpck_require__(2037);
+const tty = __nccwpck_require__(6224);
+const hasFlag = __nccwpck_require__(1621);
+
+const {env} = process;
+
+let forceColor;
+if (hasFlag('no-color') ||
+	hasFlag('no-colors') ||
+	hasFlag('color=false') ||
+	hasFlag('color=never')) {
+	forceColor = 0;
+} else if (hasFlag('color') ||
+	hasFlag('colors') ||
+	hasFlag('color=true') ||
+	hasFlag('color=always')) {
+	forceColor = 1;
+}
+
+if ('FORCE_COLOR' in env) {
+	if (env.FORCE_COLOR === 'true') {
+		forceColor = 1;
+	} else if (env.FORCE_COLOR === 'false') {
+		forceColor = 0;
+	} else {
+		forceColor = env.FORCE_COLOR.length === 0 ? 1 : Math.min(parseInt(env.FORCE_COLOR, 10), 3);
+	}
+}
+
+function translateLevel(level) {
+	if (level === 0) {
+		return false;
+	}
+
+	return {
+		level,
+		hasBasic: true,
+		has256: level >= 2,
+		has16m: level >= 3
+	};
+}
+
+function supportsColor(haveStream, streamIsTTY) {
+	if (forceColor === 0) {
+		return 0;
+	}
+
+	if (hasFlag('color=16m') ||
+		hasFlag('color=full') ||
+		hasFlag('color=truecolor')) {
+		return 3;
+	}
+
+	if (hasFlag('color=256')) {
+		return 2;
+	}
+
+	if (haveStream && !streamIsTTY && forceColor === undefined) {
+		return 0;
+	}
+
+	const min = forceColor || 0;
+
+	if (env.TERM === 'dumb') {
+		return min;
+	}
+
+	if (process.platform === 'win32') {
+		// Windows 10 build 10586 is the first Windows release that supports 256 colors.
+		// Windows 10 build 14931 is the first release that supports 16m/TrueColor.
+		const osRelease = os.release().split('.');
+		if (
+			Number(osRelease[0]) >= 10 &&
+			Number(osRelease[2]) >= 10586
+		) {
+			return Number(osRelease[2]) >= 14931 ? 3 : 2;
+		}
+
+		return 1;
+	}
+
+	if ('CI' in env) {
+		if (['TRAVIS', 'CIRCLECI', 'APPVEYOR', 'GITLAB_CI', 'GITHUB_ACTIONS', 'BUILDKITE'].some(sign => sign in env) || env.CI_NAME === 'codeship') {
+			return 1;
+		}
+
+		return min;
+	}
+
+	if ('TEAMCITY_VERSION' in env) {
+		return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+	}
+
+	if (env.COLORTERM === 'truecolor') {
+		return 3;
+	}
+
+	if ('TERM_PROGRAM' in env) {
+		const version = parseInt((env.TERM_PROGRAM_VERSION || '').split('.')[0], 10);
+
+		switch (env.TERM_PROGRAM) {
+			case 'iTerm.app':
+				return version >= 3 ? 3 : 2;
+			case 'Apple_Terminal':
+				return 2;
+			// No default
+		}
+	}
+
+	if (/-256(color)?$/i.test(env.TERM)) {
+		return 2;
+	}
+
+	if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
+		return 1;
+	}
+
+	if ('COLORTERM' in env) {
+		return 1;
+	}
+
+	return min;
+}
+
+function getSupportLevel(stream) {
+	const level = supportsColor(stream, stream && stream.isTTY);
+	return translateLevel(level);
+}
+
+module.exports = {
+	supportsColor: getSupportLevel,
+	stdout: translateLevel(supportsColor(true, tty.isatty(1))),
+	stderr: translateLevel(supportsColor(true, tty.isatty(2)))
+};
 
 
 /***/ }),
@@ -13439,6 +15240,4767 @@ function wrappy (fn, cb) {
 
 /***/ }),
 
+/***/ 3387:
+/***/ ((module) => {
+
+"use strict";
+
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// pkg/dist-src/index.js
+var dist_src_exports = {};
+__export(dist_src_exports, {
+  createTokenAuth: () => createTokenAuth
+});
+module.exports = __toCommonJS(dist_src_exports);
+
+// pkg/dist-src/auth.js
+var REGEX_IS_INSTALLATION_LEGACY = /^v1\./;
+var REGEX_IS_INSTALLATION = /^ghs_/;
+var REGEX_IS_USER_TO_SERVER = /^ghu_/;
+async function auth(token) {
+  const isApp = token.split(/\./).length === 3;
+  const isInstallation = REGEX_IS_INSTALLATION_LEGACY.test(token) || REGEX_IS_INSTALLATION.test(token);
+  const isUserToServer = REGEX_IS_USER_TO_SERVER.test(token);
+  const tokenType = isApp ? "app" : isInstallation ? "installation" : isUserToServer ? "user-to-server" : "oauth";
+  return {
+    type: "token",
+    token,
+    tokenType
+  };
+}
+
+// pkg/dist-src/with-authorization-prefix.js
+function withAuthorizationPrefix(token) {
+  if (token.split(/\./).length === 3) {
+    return `bearer ${token}`;
+  }
+  return `token ${token}`;
+}
+
+// pkg/dist-src/hook.js
+async function hook(token, request, route, parameters) {
+  const endpoint = request.endpoint.merge(
+    route,
+    parameters
+  );
+  endpoint.headers.authorization = withAuthorizationPrefix(token);
+  return request(endpoint);
+}
+
+// pkg/dist-src/index.js
+var createTokenAuth = function createTokenAuth2(token) {
+  if (!token) {
+    throw new Error("[@octokit/auth-token] No token passed to createTokenAuth");
+  }
+  if (typeof token !== "string") {
+    throw new Error(
+      "[@octokit/auth-token] Token passed to createTokenAuth is not a string"
+    );
+  }
+  token = token.replace(/^(token|bearer) +/i, "");
+  return Object.assign(auth.bind(null, token), {
+    hook: hook.bind(null, token)
+  });
+};
+// Annotate the CommonJS export names for ESM import in node:
+0 && (0);
+
+
+/***/ }),
+
+/***/ 886:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// pkg/dist-src/index.js
+var dist_src_exports = {};
+__export(dist_src_exports, {
+  Octokit: () => Octokit
+});
+module.exports = __toCommonJS(dist_src_exports);
+var import_universal_user_agent = __nccwpck_require__(5030);
+var import_before_after_hook = __nccwpck_require__(3682);
+var import_request = __nccwpck_require__(7757);
+var import_graphql = __nccwpck_require__(1593);
+var import_auth_token = __nccwpck_require__(3387);
+
+// pkg/dist-src/version.js
+var VERSION = "4.2.4";
+
+// pkg/dist-src/index.js
+var Octokit = class {
+  static defaults(defaults) {
+    const OctokitWithDefaults = class extends this {
+      constructor(...args) {
+        const options = args[0] || {};
+        if (typeof defaults === "function") {
+          super(defaults(options));
+          return;
+        }
+        super(
+          Object.assign(
+            {},
+            defaults,
+            options,
+            options.userAgent && defaults.userAgent ? {
+              userAgent: `${options.userAgent} ${defaults.userAgent}`
+            } : null
+          )
+        );
+      }
+    };
+    return OctokitWithDefaults;
+  }
+  /**
+   * Attach a plugin (or many) to your Octokit instance.
+   *
+   * @example
+   * const API = Octokit.plugin(plugin1, plugin2, plugin3, ...)
+   */
+  static plugin(...newPlugins) {
+    var _a;
+    const currentPlugins = this.plugins;
+    const NewOctokit = (_a = class extends this {
+    }, _a.plugins = currentPlugins.concat(
+      newPlugins.filter((plugin) => !currentPlugins.includes(plugin))
+    ), _a);
+    return NewOctokit;
+  }
+  constructor(options = {}) {
+    const hook = new import_before_after_hook.Collection();
+    const requestDefaults = {
+      baseUrl: import_request.request.endpoint.DEFAULTS.baseUrl,
+      headers: {},
+      request: Object.assign({}, options.request, {
+        // @ts-ignore internal usage only, no need to type
+        hook: hook.bind(null, "request")
+      }),
+      mediaType: {
+        previews: [],
+        format: ""
+      }
+    };
+    requestDefaults.headers["user-agent"] = [
+      options.userAgent,
+      `octokit-core.js/${VERSION} ${(0, import_universal_user_agent.getUserAgent)()}`
+    ].filter(Boolean).join(" ");
+    if (options.baseUrl) {
+      requestDefaults.baseUrl = options.baseUrl;
+    }
+    if (options.previews) {
+      requestDefaults.mediaType.previews = options.previews;
+    }
+    if (options.timeZone) {
+      requestDefaults.headers["time-zone"] = options.timeZone;
+    }
+    this.request = import_request.request.defaults(requestDefaults);
+    this.graphql = (0, import_graphql.withCustomRequest)(this.request).defaults(requestDefaults);
+    this.log = Object.assign(
+      {
+        debug: () => {
+        },
+        info: () => {
+        },
+        warn: console.warn.bind(console),
+        error: console.error.bind(console)
+      },
+      options.log
+    );
+    this.hook = hook;
+    if (!options.authStrategy) {
+      if (!options.auth) {
+        this.auth = async () => ({
+          type: "unauthenticated"
+        });
+      } else {
+        const auth = (0, import_auth_token.createTokenAuth)(options.auth);
+        hook.wrap("request", auth.hook);
+        this.auth = auth;
+      }
+    } else {
+      const { authStrategy, ...otherOptions } = options;
+      const auth = authStrategy(
+        Object.assign(
+          {
+            request: this.request,
+            log: this.log,
+            // we pass the current octokit instance as well as its constructor options
+            // to allow for authentication strategies that return a new octokit instance
+            // that shares the same internal state as the current one. The original
+            // requirement for this was the "event-octokit" authentication strategy
+            // of https://github.com/probot/octokit-auth-probot.
+            octokit: this,
+            octokitOptions: otherOptions
+          },
+          options.auth
+        )
+      );
+      hook.wrap("request", auth.hook);
+      this.auth = auth;
+    }
+    const classConstructor = this.constructor;
+    classConstructor.plugins.forEach((plugin) => {
+      Object.assign(this, plugin(this, options));
+    });
+  }
+};
+Octokit.VERSION = VERSION;
+Octokit.plugins = [];
+// Annotate the CommonJS export names for ESM import in node:
+0 && (0);
+
+
+/***/ }),
+
+/***/ 7026:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// pkg/dist-src/index.js
+var dist_src_exports = {};
+__export(dist_src_exports, {
+  endpoint: () => endpoint
+});
+module.exports = __toCommonJS(dist_src_exports);
+
+// pkg/dist-src/util/lowercase-keys.js
+function lowercaseKeys(object) {
+  if (!object) {
+    return {};
+  }
+  return Object.keys(object).reduce((newObj, key) => {
+    newObj[key.toLowerCase()] = object[key];
+    return newObj;
+  }, {});
+}
+
+// pkg/dist-src/util/merge-deep.js
+var import_is_plain_object = __nccwpck_require__(3287);
+function mergeDeep(defaults, options) {
+  const result = Object.assign({}, defaults);
+  Object.keys(options).forEach((key) => {
+    if ((0, import_is_plain_object.isPlainObject)(options[key])) {
+      if (!(key in defaults))
+        Object.assign(result, { [key]: options[key] });
+      else
+        result[key] = mergeDeep(defaults[key], options[key]);
+    } else {
+      Object.assign(result, { [key]: options[key] });
+    }
+  });
+  return result;
+}
+
+// pkg/dist-src/util/remove-undefined-properties.js
+function removeUndefinedProperties(obj) {
+  for (const key in obj) {
+    if (obj[key] === void 0) {
+      delete obj[key];
+    }
+  }
+  return obj;
+}
+
+// pkg/dist-src/merge.js
+function merge(defaults, route, options) {
+  if (typeof route === "string") {
+    let [method, url] = route.split(" ");
+    options = Object.assign(url ? { method, url } : { url: method }, options);
+  } else {
+    options = Object.assign({}, route);
+  }
+  options.headers = lowercaseKeys(options.headers);
+  removeUndefinedProperties(options);
+  removeUndefinedProperties(options.headers);
+  const mergedOptions = mergeDeep(defaults || {}, options);
+  if (defaults && defaults.mediaType.previews.length) {
+    mergedOptions.mediaType.previews = defaults.mediaType.previews.filter((preview) => !mergedOptions.mediaType.previews.includes(preview)).concat(mergedOptions.mediaType.previews);
+  }
+  mergedOptions.mediaType.previews = mergedOptions.mediaType.previews.map(
+    (preview) => preview.replace(/-preview/, "")
+  );
+  return mergedOptions;
+}
+
+// pkg/dist-src/util/add-query-parameters.js
+function addQueryParameters(url, parameters) {
+  const separator = /\?/.test(url) ? "&" : "?";
+  const names = Object.keys(parameters);
+  if (names.length === 0) {
+    return url;
+  }
+  return url + separator + names.map((name) => {
+    if (name === "q") {
+      return "q=" + parameters.q.split("+").map(encodeURIComponent).join("+");
+    }
+    return `${name}=${encodeURIComponent(parameters[name])}`;
+  }).join("&");
+}
+
+// pkg/dist-src/util/extract-url-variable-names.js
+var urlVariableRegex = /\{[^}]+\}/g;
+function removeNonChars(variableName) {
+  return variableName.replace(/^\W+|\W+$/g, "").split(/,/);
+}
+function extractUrlVariableNames(url) {
+  const matches = url.match(urlVariableRegex);
+  if (!matches) {
+    return [];
+  }
+  return matches.map(removeNonChars).reduce((a, b) => a.concat(b), []);
+}
+
+// pkg/dist-src/util/omit.js
+function omit(object, keysToOmit) {
+  return Object.keys(object).filter((option) => !keysToOmit.includes(option)).reduce((obj, key) => {
+    obj[key] = object[key];
+    return obj;
+  }, {});
+}
+
+// pkg/dist-src/util/url-template.js
+function encodeReserved(str) {
+  return str.split(/(%[0-9A-Fa-f]{2})/g).map(function(part) {
+    if (!/%[0-9A-Fa-f]/.test(part)) {
+      part = encodeURI(part).replace(/%5B/g, "[").replace(/%5D/g, "]");
+    }
+    return part;
+  }).join("");
+}
+function encodeUnreserved(str) {
+  return encodeURIComponent(str).replace(/[!'()*]/g, function(c) {
+    return "%" + c.charCodeAt(0).toString(16).toUpperCase();
+  });
+}
+function encodeValue(operator, value, key) {
+  value = operator === "+" || operator === "#" ? encodeReserved(value) : encodeUnreserved(value);
+  if (key) {
+    return encodeUnreserved(key) + "=" + value;
+  } else {
+    return value;
+  }
+}
+function isDefined(value) {
+  return value !== void 0 && value !== null;
+}
+function isKeyOperator(operator) {
+  return operator === ";" || operator === "&" || operator === "?";
+}
+function getValues(context, operator, key, modifier) {
+  var value = context[key], result = [];
+  if (isDefined(value) && value !== "") {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      value = value.toString();
+      if (modifier && modifier !== "*") {
+        value = value.substring(0, parseInt(modifier, 10));
+      }
+      result.push(
+        encodeValue(operator, value, isKeyOperator(operator) ? key : "")
+      );
+    } else {
+      if (modifier === "*") {
+        if (Array.isArray(value)) {
+          value.filter(isDefined).forEach(function(value2) {
+            result.push(
+              encodeValue(operator, value2, isKeyOperator(operator) ? key : "")
+            );
+          });
+        } else {
+          Object.keys(value).forEach(function(k) {
+            if (isDefined(value[k])) {
+              result.push(encodeValue(operator, value[k], k));
+            }
+          });
+        }
+      } else {
+        const tmp = [];
+        if (Array.isArray(value)) {
+          value.filter(isDefined).forEach(function(value2) {
+            tmp.push(encodeValue(operator, value2));
+          });
+        } else {
+          Object.keys(value).forEach(function(k) {
+            if (isDefined(value[k])) {
+              tmp.push(encodeUnreserved(k));
+              tmp.push(encodeValue(operator, value[k].toString()));
+            }
+          });
+        }
+        if (isKeyOperator(operator)) {
+          result.push(encodeUnreserved(key) + "=" + tmp.join(","));
+        } else if (tmp.length !== 0) {
+          result.push(tmp.join(","));
+        }
+      }
+    }
+  } else {
+    if (operator === ";") {
+      if (isDefined(value)) {
+        result.push(encodeUnreserved(key));
+      }
+    } else if (value === "" && (operator === "&" || operator === "?")) {
+      result.push(encodeUnreserved(key) + "=");
+    } else if (value === "") {
+      result.push("");
+    }
+  }
+  return result;
+}
+function parseUrl(template) {
+  return {
+    expand: expand.bind(null, template)
+  };
+}
+function expand(template, context) {
+  var operators = ["+", "#", ".", "/", ";", "?", "&"];
+  return template.replace(
+    /\{([^\{\}]+)\}|([^\{\}]+)/g,
+    function(_, expression, literal) {
+      if (expression) {
+        let operator = "";
+        const values = [];
+        if (operators.indexOf(expression.charAt(0)) !== -1) {
+          operator = expression.charAt(0);
+          expression = expression.substr(1);
+        }
+        expression.split(/,/g).forEach(function(variable) {
+          var tmp = /([^:\*]*)(?::(\d+)|(\*))?/.exec(variable);
+          values.push(getValues(context, operator, tmp[1], tmp[2] || tmp[3]));
+        });
+        if (operator && operator !== "+") {
+          var separator = ",";
+          if (operator === "?") {
+            separator = "&";
+          } else if (operator !== "#") {
+            separator = operator;
+          }
+          return (values.length !== 0 ? operator : "") + values.join(separator);
+        } else {
+          return values.join(",");
+        }
+      } else {
+        return encodeReserved(literal);
+      }
+    }
+  );
+}
+
+// pkg/dist-src/parse.js
+function parse(options) {
+  let method = options.method.toUpperCase();
+  let url = (options.url || "/").replace(/:([a-z]\w+)/g, "{$1}");
+  let headers = Object.assign({}, options.headers);
+  let body;
+  let parameters = omit(options, [
+    "method",
+    "baseUrl",
+    "url",
+    "headers",
+    "request",
+    "mediaType"
+  ]);
+  const urlVariableNames = extractUrlVariableNames(url);
+  url = parseUrl(url).expand(parameters);
+  if (!/^http/.test(url)) {
+    url = options.baseUrl + url;
+  }
+  const omittedParameters = Object.keys(options).filter((option) => urlVariableNames.includes(option)).concat("baseUrl");
+  const remainingParameters = omit(parameters, omittedParameters);
+  const isBinaryRequest = /application\/octet-stream/i.test(headers.accept);
+  if (!isBinaryRequest) {
+    if (options.mediaType.format) {
+      headers.accept = headers.accept.split(/,/).map(
+        (preview) => preview.replace(
+          /application\/vnd(\.\w+)(\.v3)?(\.\w+)?(\+json)?$/,
+          `application/vnd$1$2.${options.mediaType.format}`
+        )
+      ).join(",");
+    }
+    if (options.mediaType.previews.length) {
+      const previewsFromAcceptHeader = headers.accept.match(/[\w-]+(?=-preview)/g) || [];
+      headers.accept = previewsFromAcceptHeader.concat(options.mediaType.previews).map((preview) => {
+        const format = options.mediaType.format ? `.${options.mediaType.format}` : "+json";
+        return `application/vnd.github.${preview}-preview${format}`;
+      }).join(",");
+    }
+  }
+  if (["GET", "HEAD"].includes(method)) {
+    url = addQueryParameters(url, remainingParameters);
+  } else {
+    if ("data" in remainingParameters) {
+      body = remainingParameters.data;
+    } else {
+      if (Object.keys(remainingParameters).length) {
+        body = remainingParameters;
+      }
+    }
+  }
+  if (!headers["content-type"] && typeof body !== "undefined") {
+    headers["content-type"] = "application/json; charset=utf-8";
+  }
+  if (["PATCH", "PUT"].includes(method) && typeof body === "undefined") {
+    body = "";
+  }
+  return Object.assign(
+    { method, url, headers },
+    typeof body !== "undefined" ? { body } : null,
+    options.request ? { request: options.request } : null
+  );
+}
+
+// pkg/dist-src/endpoint-with-defaults.js
+function endpointWithDefaults(defaults, route, options) {
+  return parse(merge(defaults, route, options));
+}
+
+// pkg/dist-src/with-defaults.js
+function withDefaults(oldDefaults, newDefaults) {
+  const DEFAULTS2 = merge(oldDefaults, newDefaults);
+  const endpoint2 = endpointWithDefaults.bind(null, DEFAULTS2);
+  return Object.assign(endpoint2, {
+    DEFAULTS: DEFAULTS2,
+    defaults: withDefaults.bind(null, DEFAULTS2),
+    merge: merge.bind(null, DEFAULTS2),
+    parse
+  });
+}
+
+// pkg/dist-src/defaults.js
+var import_universal_user_agent = __nccwpck_require__(5030);
+
+// pkg/dist-src/version.js
+var VERSION = "7.0.6";
+
+// pkg/dist-src/defaults.js
+var userAgent = `octokit-endpoint.js/${VERSION} ${(0, import_universal_user_agent.getUserAgent)()}`;
+var DEFAULTS = {
+  method: "GET",
+  baseUrl: "https://api.github.com",
+  headers: {
+    accept: "application/vnd.github.v3+json",
+    "user-agent": userAgent
+  },
+  mediaType: {
+    format: "",
+    previews: []
+  }
+};
+
+// pkg/dist-src/index.js
+var endpoint = withDefaults(null, DEFAULTS);
+// Annotate the CommonJS export names for ESM import in node:
+0 && (0);
+
+
+/***/ }),
+
+/***/ 1593:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// pkg/dist-src/index.js
+var dist_src_exports = {};
+__export(dist_src_exports, {
+  GraphqlResponseError: () => GraphqlResponseError,
+  graphql: () => graphql2,
+  withCustomRequest: () => withCustomRequest
+});
+module.exports = __toCommonJS(dist_src_exports);
+var import_request = __nccwpck_require__(7757);
+var import_universal_user_agent = __nccwpck_require__(5030);
+
+// pkg/dist-src/version.js
+var VERSION = "5.0.6";
+
+// pkg/dist-src/error.js
+function _buildMessageForResponseErrors(data) {
+  return `Request failed due to following response errors:
+` + data.errors.map((e) => ` - ${e.message}`).join("\n");
+}
+var GraphqlResponseError = class extends Error {
+  constructor(request2, headers, response) {
+    super(_buildMessageForResponseErrors(response));
+    this.request = request2;
+    this.headers = headers;
+    this.response = response;
+    this.name = "GraphqlResponseError";
+    this.errors = response.errors;
+    this.data = response.data;
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, this.constructor);
+    }
+  }
+};
+
+// pkg/dist-src/graphql.js
+var NON_VARIABLE_OPTIONS = [
+  "method",
+  "baseUrl",
+  "url",
+  "headers",
+  "request",
+  "query",
+  "mediaType"
+];
+var FORBIDDEN_VARIABLE_OPTIONS = ["query", "method", "url"];
+var GHES_V3_SUFFIX_REGEX = /\/api\/v3\/?$/;
+function graphql(request2, query, options) {
+  if (options) {
+    if (typeof query === "string" && "query" in options) {
+      return Promise.reject(
+        new Error(`[@octokit/graphql] "query" cannot be used as variable name`)
+      );
+    }
+    for (const key in options) {
+      if (!FORBIDDEN_VARIABLE_OPTIONS.includes(key))
+        continue;
+      return Promise.reject(
+        new Error(`[@octokit/graphql] "${key}" cannot be used as variable name`)
+      );
+    }
+  }
+  const parsedOptions = typeof query === "string" ? Object.assign({ query }, options) : query;
+  const requestOptions = Object.keys(
+    parsedOptions
+  ).reduce((result, key) => {
+    if (NON_VARIABLE_OPTIONS.includes(key)) {
+      result[key] = parsedOptions[key];
+      return result;
+    }
+    if (!result.variables) {
+      result.variables = {};
+    }
+    result.variables[key] = parsedOptions[key];
+    return result;
+  }, {});
+  const baseUrl = parsedOptions.baseUrl || request2.endpoint.DEFAULTS.baseUrl;
+  if (GHES_V3_SUFFIX_REGEX.test(baseUrl)) {
+    requestOptions.url = baseUrl.replace(GHES_V3_SUFFIX_REGEX, "/api/graphql");
+  }
+  return request2(requestOptions).then((response) => {
+    if (response.data.errors) {
+      const headers = {};
+      for (const key of Object.keys(response.headers)) {
+        headers[key] = response.headers[key];
+      }
+      throw new GraphqlResponseError(
+        requestOptions,
+        headers,
+        response.data
+      );
+    }
+    return response.data.data;
+  });
+}
+
+// pkg/dist-src/with-defaults.js
+function withDefaults(request2, newDefaults) {
+  const newRequest = request2.defaults(newDefaults);
+  const newApi = (query, options) => {
+    return graphql(newRequest, query, options);
+  };
+  return Object.assign(newApi, {
+    defaults: withDefaults.bind(null, newRequest),
+    endpoint: newRequest.endpoint
+  });
+}
+
+// pkg/dist-src/index.js
+var graphql2 = withDefaults(import_request.request, {
+  headers: {
+    "user-agent": `octokit-graphql.js/${VERSION} ${(0, import_universal_user_agent.getUserAgent)()}`
+  },
+  method: "POST",
+  url: "/graphql"
+});
+function withCustomRequest(customRequest) {
+  return withDefaults(customRequest, {
+    method: "POST",
+    url: "/graphql"
+  });
+}
+// Annotate the CommonJS export names for ESM import in node:
+0 && (0);
+
+
+/***/ }),
+
+/***/ 4407:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+
+const VERSION = "5.0.1";
+
+/**
+ * Some “list” response that can be paginated have a different response structure
+ *
+ * They have a `total_count` key in the response (search also has `incomplete_results`,
+ * /installation/repositories also has `repository_selection`), as well as a key with
+ * the list of the items which name varies from endpoint to endpoint.
+ *
+ * Octokit normalizes these responses so that paginated results are always returned following
+ * the same structure. One challenge is that if the list response has only one page, no Link
+ * header is provided, so this header alone is not sufficient to check wether a response is
+ * paginated or not.
+ *
+ * We check if a "total_count" key is present in the response data, but also make sure that
+ * a "url" property is not, as the "Get the combined status for a specific ref" endpoint would
+ * otherwise match: https://developer.github.com/v3/repos/statuses/#get-the-combined-status-for-a-specific-ref
+ */
+function normalizePaginatedListResponse(response) {
+  // endpoints can respond with 204 if repository is empty
+  if (!response.data) {
+    return {
+      ...response,
+      data: []
+    };
+  }
+  const responseNeedsNormalization = "total_count" in response.data && !("url" in response.data);
+  if (!responseNeedsNormalization) return response;
+  // keep the additional properties intact as there is currently no other way
+  // to retrieve the same information.
+  const incompleteResults = response.data.incomplete_results;
+  const repositorySelection = response.data.repository_selection;
+  const totalCount = response.data.total_count;
+  delete response.data.incomplete_results;
+  delete response.data.repository_selection;
+  delete response.data.total_count;
+  const namespaceKey = Object.keys(response.data)[0];
+  const data = response.data[namespaceKey];
+  response.data = data;
+  if (typeof incompleteResults !== "undefined") {
+    response.data.incomplete_results = incompleteResults;
+  }
+  if (typeof repositorySelection !== "undefined") {
+    response.data.repository_selection = repositorySelection;
+  }
+  response.data.total_count = totalCount;
+  return response;
+}
+
+function iterator(octokit, route, parameters) {
+  const options = typeof route === "function" ? route.endpoint(parameters) : octokit.request.endpoint(route, parameters);
+  const requestMethod = typeof route === "function" ? route : octokit.request;
+  const method = options.method;
+  const headers = options.headers;
+  let url = options.url;
+  return {
+    [Symbol.asyncIterator]: () => ({
+      async next() {
+        if (!url) return {
+          done: true
+        };
+        try {
+          const response = await requestMethod({
+            method,
+            url,
+            headers
+          });
+          const normalizedResponse = normalizePaginatedListResponse(response);
+          // `response.headers.link` format:
+          // '<https://api.github.com/users/aseemk/followers?page=2>; rel="next", <https://api.github.com/users/aseemk/followers?page=2>; rel="last"'
+          // sets `url` to undefined if "next" URL is not present or `link` header is not set
+          url = ((normalizedResponse.headers.link || "").match(/<([^>]+)>;\s*rel="next"/) || [])[1];
+          return {
+            value: normalizedResponse
+          };
+        } catch (error) {
+          if (error.status !== 409) throw error;
+          url = "";
+          return {
+            value: {
+              status: 200,
+              headers: {},
+              data: []
+            }
+          };
+        }
+      }
+    })
+  };
+}
+
+function paginate(octokit, route, parameters, mapFn) {
+  if (typeof parameters === "function") {
+    mapFn = parameters;
+    parameters = undefined;
+  }
+  return gather(octokit, [], iterator(octokit, route, parameters)[Symbol.asyncIterator](), mapFn);
+}
+function gather(octokit, results, iterator, mapFn) {
+  return iterator.next().then(result => {
+    if (result.done) {
+      return results;
+    }
+    let earlyExit = false;
+    function done() {
+      earlyExit = true;
+    }
+    results = results.concat(mapFn ? mapFn(result.value, done) : result.value.data);
+    if (earlyExit) {
+      return results;
+    }
+    return gather(octokit, results, iterator, mapFn);
+  });
+}
+
+const composePaginateRest = Object.assign(paginate, {
+  iterator
+});
+
+const paginatingEndpoints = ["GET /app/hook/deliveries", "GET /app/installations", "GET /enterprises/{enterprise}/actions/permissions/organizations", "GET /enterprises/{enterprise}/actions/runner-groups", "GET /enterprises/{enterprise}/actions/runner-groups/{runner_group_id}/organizations", "GET /enterprises/{enterprise}/actions/runner-groups/{runner_group_id}/runners", "GET /enterprises/{enterprise}/actions/runners", "GET /enterprises/{enterprise}/code-scanning/alerts", "GET /enterprises/{enterprise}/secret-scanning/alerts", "GET /enterprises/{enterprise}/settings/billing/advanced-security", "GET /events", "GET /gists", "GET /gists/public", "GET /gists/starred", "GET /gists/{gist_id}/comments", "GET /gists/{gist_id}/commits", "GET /gists/{gist_id}/forks", "GET /installation/repositories", "GET /issues", "GET /licenses", "GET /marketplace_listing/plans", "GET /marketplace_listing/plans/{plan_id}/accounts", "GET /marketplace_listing/stubbed/plans", "GET /marketplace_listing/stubbed/plans/{plan_id}/accounts", "GET /networks/{owner}/{repo}/events", "GET /notifications", "GET /organizations", "GET /organizations/{org}/codespaces/secrets", "GET /organizations/{org}/codespaces/secrets/{secret_name}/repositories", "GET /orgs/{org}/actions/cache/usage-by-repository", "GET /orgs/{org}/actions/permissions/repositories", "GET /orgs/{org}/actions/runner-groups", "GET /orgs/{org}/actions/runner-groups/{runner_group_id}/repositories", "GET /orgs/{org}/actions/runner-groups/{runner_group_id}/runners", "GET /orgs/{org}/actions/runners", "GET /orgs/{org}/actions/secrets", "GET /orgs/{org}/actions/secrets/{secret_name}/repositories", "GET /orgs/{org}/blocks", "GET /orgs/{org}/code-scanning/alerts", "GET /orgs/{org}/codespaces", "GET /orgs/{org}/dependabot/secrets", "GET /orgs/{org}/dependabot/secrets/{secret_name}/repositories", "GET /orgs/{org}/events", "GET /orgs/{org}/failed_invitations", "GET /orgs/{org}/hooks", "GET /orgs/{org}/hooks/{hook_id}/deliveries", "GET /orgs/{org}/installations", "GET /orgs/{org}/invitations", "GET /orgs/{org}/invitations/{invitation_id}/teams", "GET /orgs/{org}/issues", "GET /orgs/{org}/members", "GET /orgs/{org}/migrations", "GET /orgs/{org}/migrations/{migration_id}/repositories", "GET /orgs/{org}/outside_collaborators", "GET /orgs/{org}/packages", "GET /orgs/{org}/packages/{package_type}/{package_name}/versions", "GET /orgs/{org}/projects", "GET /orgs/{org}/public_members", "GET /orgs/{org}/repos", "GET /orgs/{org}/secret-scanning/alerts", "GET /orgs/{org}/settings/billing/advanced-security", "GET /orgs/{org}/teams", "GET /orgs/{org}/teams/{team_slug}/discussions", "GET /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/comments", "GET /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/comments/{comment_number}/reactions", "GET /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/reactions", "GET /orgs/{org}/teams/{team_slug}/invitations", "GET /orgs/{org}/teams/{team_slug}/members", "GET /orgs/{org}/teams/{team_slug}/projects", "GET /orgs/{org}/teams/{team_slug}/repos", "GET /orgs/{org}/teams/{team_slug}/teams", "GET /projects/columns/{column_id}/cards", "GET /projects/{project_id}/collaborators", "GET /projects/{project_id}/columns", "GET /repos/{owner}/{repo}/actions/artifacts", "GET /repos/{owner}/{repo}/actions/caches", "GET /repos/{owner}/{repo}/actions/runners", "GET /repos/{owner}/{repo}/actions/runs", "GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts", "GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}/jobs", "GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs", "GET /repos/{owner}/{repo}/actions/secrets", "GET /repos/{owner}/{repo}/actions/workflows", "GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs", "GET /repos/{owner}/{repo}/assignees", "GET /repos/{owner}/{repo}/branches", "GET /repos/{owner}/{repo}/check-runs/{check_run_id}/annotations", "GET /repos/{owner}/{repo}/check-suites/{check_suite_id}/check-runs", "GET /repos/{owner}/{repo}/code-scanning/alerts", "GET /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/instances", "GET /repos/{owner}/{repo}/code-scanning/analyses", "GET /repos/{owner}/{repo}/codespaces", "GET /repos/{owner}/{repo}/codespaces/devcontainers", "GET /repos/{owner}/{repo}/codespaces/secrets", "GET /repos/{owner}/{repo}/collaborators", "GET /repos/{owner}/{repo}/comments", "GET /repos/{owner}/{repo}/comments/{comment_id}/reactions", "GET /repos/{owner}/{repo}/commits", "GET /repos/{owner}/{repo}/commits/{commit_sha}/comments", "GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls", "GET /repos/{owner}/{repo}/commits/{ref}/check-runs", "GET /repos/{owner}/{repo}/commits/{ref}/check-suites", "GET /repos/{owner}/{repo}/commits/{ref}/status", "GET /repos/{owner}/{repo}/commits/{ref}/statuses", "GET /repos/{owner}/{repo}/contributors", "GET /repos/{owner}/{repo}/dependabot/alerts", "GET /repos/{owner}/{repo}/dependabot/secrets", "GET /repos/{owner}/{repo}/deployments", "GET /repos/{owner}/{repo}/deployments/{deployment_id}/statuses", "GET /repos/{owner}/{repo}/environments", "GET /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies", "GET /repos/{owner}/{repo}/events", "GET /repos/{owner}/{repo}/forks", "GET /repos/{owner}/{repo}/hooks", "GET /repos/{owner}/{repo}/hooks/{hook_id}/deliveries", "GET /repos/{owner}/{repo}/invitations", "GET /repos/{owner}/{repo}/issues", "GET /repos/{owner}/{repo}/issues/comments", "GET /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions", "GET /repos/{owner}/{repo}/issues/events", "GET /repos/{owner}/{repo}/issues/{issue_number}/comments", "GET /repos/{owner}/{repo}/issues/{issue_number}/events", "GET /repos/{owner}/{repo}/issues/{issue_number}/labels", "GET /repos/{owner}/{repo}/issues/{issue_number}/reactions", "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline", "GET /repos/{owner}/{repo}/keys", "GET /repos/{owner}/{repo}/labels", "GET /repos/{owner}/{repo}/milestones", "GET /repos/{owner}/{repo}/milestones/{milestone_number}/labels", "GET /repos/{owner}/{repo}/notifications", "GET /repos/{owner}/{repo}/pages/builds", "GET /repos/{owner}/{repo}/projects", "GET /repos/{owner}/{repo}/pulls", "GET /repos/{owner}/{repo}/pulls/comments", "GET /repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions", "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments", "GET /repos/{owner}/{repo}/pulls/{pull_number}/commits", "GET /repos/{owner}/{repo}/pulls/{pull_number}/files", "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews", "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments", "GET /repos/{owner}/{repo}/releases", "GET /repos/{owner}/{repo}/releases/{release_id}/assets", "GET /repos/{owner}/{repo}/releases/{release_id}/reactions", "GET /repos/{owner}/{repo}/secret-scanning/alerts", "GET /repos/{owner}/{repo}/secret-scanning/alerts/{alert_number}/locations", "GET /repos/{owner}/{repo}/stargazers", "GET /repos/{owner}/{repo}/subscribers", "GET /repos/{owner}/{repo}/tags", "GET /repos/{owner}/{repo}/teams", "GET /repos/{owner}/{repo}/topics", "GET /repositories", "GET /repositories/{repository_id}/environments/{environment_name}/secrets", "GET /search/code", "GET /search/commits", "GET /search/issues", "GET /search/labels", "GET /search/repositories", "GET /search/topics", "GET /search/users", "GET /teams/{team_id}/discussions", "GET /teams/{team_id}/discussions/{discussion_number}/comments", "GET /teams/{team_id}/discussions/{discussion_number}/comments/{comment_number}/reactions", "GET /teams/{team_id}/discussions/{discussion_number}/reactions", "GET /teams/{team_id}/invitations", "GET /teams/{team_id}/members", "GET /teams/{team_id}/projects", "GET /teams/{team_id}/repos", "GET /teams/{team_id}/teams", "GET /user/blocks", "GET /user/codespaces", "GET /user/codespaces/secrets", "GET /user/emails", "GET /user/followers", "GET /user/following", "GET /user/gpg_keys", "GET /user/installations", "GET /user/installations/{installation_id}/repositories", "GET /user/issues", "GET /user/keys", "GET /user/marketplace_purchases", "GET /user/marketplace_purchases/stubbed", "GET /user/memberships/orgs", "GET /user/migrations", "GET /user/migrations/{migration_id}/repositories", "GET /user/orgs", "GET /user/packages", "GET /user/packages/{package_type}/{package_name}/versions", "GET /user/public_emails", "GET /user/repos", "GET /user/repository_invitations", "GET /user/ssh_signing_keys", "GET /user/starred", "GET /user/subscriptions", "GET /user/teams", "GET /users", "GET /users/{username}/events", "GET /users/{username}/events/orgs/{org}", "GET /users/{username}/events/public", "GET /users/{username}/followers", "GET /users/{username}/following", "GET /users/{username}/gists", "GET /users/{username}/gpg_keys", "GET /users/{username}/keys", "GET /users/{username}/orgs", "GET /users/{username}/packages", "GET /users/{username}/projects", "GET /users/{username}/received_events", "GET /users/{username}/received_events/public", "GET /users/{username}/repos", "GET /users/{username}/ssh_signing_keys", "GET /users/{username}/starred", "GET /users/{username}/subscriptions"];
+
+function isPaginatingEndpoint(arg) {
+  if (typeof arg === "string") {
+    return paginatingEndpoints.includes(arg);
+  } else {
+    return false;
+  }
+}
+
+/**
+ * @param octokit Octokit instance
+ * @param options Options passed to Octokit constructor
+ */
+function paginateRest(octokit) {
+  return {
+    paginate: Object.assign(paginate.bind(null, octokit), {
+      iterator: iterator.bind(null, octokit)
+    })
+  };
+}
+paginateRest.VERSION = VERSION;
+
+exports.composePaginateRest = composePaginateRest;
+exports.isPaginatingEndpoint = isPaginatingEndpoint;
+exports.paginateRest = paginateRest;
+exports.paginatingEndpoints = paginatingEndpoints;
+//# sourceMappingURL=index.js.map
+
+
+/***/ }),
+
+/***/ 1326:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+
+const Endpoints = {
+  actions: {
+    addCustomLabelsToSelfHostedRunnerForOrg: ["POST /orgs/{org}/actions/runners/{runner_id}/labels"],
+    addCustomLabelsToSelfHostedRunnerForRepo: ["POST /repos/{owner}/{repo}/actions/runners/{runner_id}/labels"],
+    addSelectedRepoToOrgSecret: ["PUT /orgs/{org}/actions/secrets/{secret_name}/repositories/{repository_id}"],
+    approveWorkflowRun: ["POST /repos/{owner}/{repo}/actions/runs/{run_id}/approve"],
+    cancelWorkflowRun: ["POST /repos/{owner}/{repo}/actions/runs/{run_id}/cancel"],
+    createOrUpdateEnvironmentSecret: ["PUT /repositories/{repository_id}/environments/{environment_name}/secrets/{secret_name}"],
+    createOrUpdateOrgSecret: ["PUT /orgs/{org}/actions/secrets/{secret_name}"],
+    createOrUpdateRepoSecret: ["PUT /repos/{owner}/{repo}/actions/secrets/{secret_name}"],
+    createRegistrationTokenForOrg: ["POST /orgs/{org}/actions/runners/registration-token"],
+    createRegistrationTokenForRepo: ["POST /repos/{owner}/{repo}/actions/runners/registration-token"],
+    createRemoveTokenForOrg: ["POST /orgs/{org}/actions/runners/remove-token"],
+    createRemoveTokenForRepo: ["POST /repos/{owner}/{repo}/actions/runners/remove-token"],
+    createWorkflowDispatch: ["POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches"],
+    deleteActionsCacheById: ["DELETE /repos/{owner}/{repo}/actions/caches/{cache_id}"],
+    deleteActionsCacheByKey: ["DELETE /repos/{owner}/{repo}/actions/caches{?key,ref}"],
+    deleteArtifact: ["DELETE /repos/{owner}/{repo}/actions/artifacts/{artifact_id}"],
+    deleteEnvironmentSecret: ["DELETE /repositories/{repository_id}/environments/{environment_name}/secrets/{secret_name}"],
+    deleteOrgSecret: ["DELETE /orgs/{org}/actions/secrets/{secret_name}"],
+    deleteRepoSecret: ["DELETE /repos/{owner}/{repo}/actions/secrets/{secret_name}"],
+    deleteSelfHostedRunnerFromOrg: ["DELETE /orgs/{org}/actions/runners/{runner_id}"],
+    deleteSelfHostedRunnerFromRepo: ["DELETE /repos/{owner}/{repo}/actions/runners/{runner_id}"],
+    deleteWorkflowRun: ["DELETE /repos/{owner}/{repo}/actions/runs/{run_id}"],
+    deleteWorkflowRunLogs: ["DELETE /repos/{owner}/{repo}/actions/runs/{run_id}/logs"],
+    disableSelectedRepositoryGithubActionsOrganization: ["DELETE /orgs/{org}/actions/permissions/repositories/{repository_id}"],
+    disableWorkflow: ["PUT /repos/{owner}/{repo}/actions/workflows/{workflow_id}/disable"],
+    downloadArtifact: ["GET /repos/{owner}/{repo}/actions/artifacts/{artifact_id}/{archive_format}"],
+    downloadJobLogsForWorkflowRun: ["GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs"],
+    downloadWorkflowRunAttemptLogs: ["GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}/logs"],
+    downloadWorkflowRunLogs: ["GET /repos/{owner}/{repo}/actions/runs/{run_id}/logs"],
+    enableSelectedRepositoryGithubActionsOrganization: ["PUT /orgs/{org}/actions/permissions/repositories/{repository_id}"],
+    enableWorkflow: ["PUT /repos/{owner}/{repo}/actions/workflows/{workflow_id}/enable"],
+    getActionsCacheList: ["GET /repos/{owner}/{repo}/actions/caches"],
+    getActionsCacheUsage: ["GET /repos/{owner}/{repo}/actions/cache/usage"],
+    getActionsCacheUsageByRepoForOrg: ["GET /orgs/{org}/actions/cache/usage-by-repository"],
+    getActionsCacheUsageForEnterprise: ["GET /enterprises/{enterprise}/actions/cache/usage"],
+    getActionsCacheUsageForOrg: ["GET /orgs/{org}/actions/cache/usage"],
+    getAllowedActionsOrganization: ["GET /orgs/{org}/actions/permissions/selected-actions"],
+    getAllowedActionsRepository: ["GET /repos/{owner}/{repo}/actions/permissions/selected-actions"],
+    getArtifact: ["GET /repos/{owner}/{repo}/actions/artifacts/{artifact_id}"],
+    getEnvironmentPublicKey: ["GET /repositories/{repository_id}/environments/{environment_name}/secrets/public-key"],
+    getEnvironmentSecret: ["GET /repositories/{repository_id}/environments/{environment_name}/secrets/{secret_name}"],
+    getGithubActionsDefaultWorkflowPermissionsEnterprise: ["GET /enterprises/{enterprise}/actions/permissions/workflow"],
+    getGithubActionsDefaultWorkflowPermissionsOrganization: ["GET /orgs/{org}/actions/permissions/workflow"],
+    getGithubActionsDefaultWorkflowPermissionsRepository: ["GET /repos/{owner}/{repo}/actions/permissions/workflow"],
+    getGithubActionsPermissionsOrganization: ["GET /orgs/{org}/actions/permissions"],
+    getGithubActionsPermissionsRepository: ["GET /repos/{owner}/{repo}/actions/permissions"],
+    getJobForWorkflowRun: ["GET /repos/{owner}/{repo}/actions/jobs/{job_id}"],
+    getOrgPublicKey: ["GET /orgs/{org}/actions/secrets/public-key"],
+    getOrgSecret: ["GET /orgs/{org}/actions/secrets/{secret_name}"],
+    getPendingDeploymentsForRun: ["GET /repos/{owner}/{repo}/actions/runs/{run_id}/pending_deployments"],
+    getRepoPermissions: ["GET /repos/{owner}/{repo}/actions/permissions", {}, {
+      renamed: ["actions", "getGithubActionsPermissionsRepository"]
+    }],
+    getRepoPublicKey: ["GET /repos/{owner}/{repo}/actions/secrets/public-key"],
+    getRepoSecret: ["GET /repos/{owner}/{repo}/actions/secrets/{secret_name}"],
+    getReviewsForRun: ["GET /repos/{owner}/{repo}/actions/runs/{run_id}/approvals"],
+    getSelfHostedRunnerForOrg: ["GET /orgs/{org}/actions/runners/{runner_id}"],
+    getSelfHostedRunnerForRepo: ["GET /repos/{owner}/{repo}/actions/runners/{runner_id}"],
+    getWorkflow: ["GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}"],
+    getWorkflowAccessToRepository: ["GET /repos/{owner}/{repo}/actions/permissions/access"],
+    getWorkflowRun: ["GET /repos/{owner}/{repo}/actions/runs/{run_id}"],
+    getWorkflowRunAttempt: ["GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}"],
+    getWorkflowRunUsage: ["GET /repos/{owner}/{repo}/actions/runs/{run_id}/timing"],
+    getWorkflowUsage: ["GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/timing"],
+    listArtifactsForRepo: ["GET /repos/{owner}/{repo}/actions/artifacts"],
+    listEnvironmentSecrets: ["GET /repositories/{repository_id}/environments/{environment_name}/secrets"],
+    listJobsForWorkflowRun: ["GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs"],
+    listJobsForWorkflowRunAttempt: ["GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}/jobs"],
+    listLabelsForSelfHostedRunnerForOrg: ["GET /orgs/{org}/actions/runners/{runner_id}/labels"],
+    listLabelsForSelfHostedRunnerForRepo: ["GET /repos/{owner}/{repo}/actions/runners/{runner_id}/labels"],
+    listOrgSecrets: ["GET /orgs/{org}/actions/secrets"],
+    listRepoSecrets: ["GET /repos/{owner}/{repo}/actions/secrets"],
+    listRepoWorkflows: ["GET /repos/{owner}/{repo}/actions/workflows"],
+    listRunnerApplicationsForOrg: ["GET /orgs/{org}/actions/runners/downloads"],
+    listRunnerApplicationsForRepo: ["GET /repos/{owner}/{repo}/actions/runners/downloads"],
+    listSelectedReposForOrgSecret: ["GET /orgs/{org}/actions/secrets/{secret_name}/repositories"],
+    listSelectedRepositoriesEnabledGithubActionsOrganization: ["GET /orgs/{org}/actions/permissions/repositories"],
+    listSelfHostedRunnersForOrg: ["GET /orgs/{org}/actions/runners"],
+    listSelfHostedRunnersForRepo: ["GET /repos/{owner}/{repo}/actions/runners"],
+    listWorkflowRunArtifacts: ["GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts"],
+    listWorkflowRuns: ["GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs"],
+    listWorkflowRunsForRepo: ["GET /repos/{owner}/{repo}/actions/runs"],
+    reRunJobForWorkflowRun: ["POST /repos/{owner}/{repo}/actions/jobs/{job_id}/rerun"],
+    reRunWorkflow: ["POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun"],
+    reRunWorkflowFailedJobs: ["POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun-failed-jobs"],
+    removeAllCustomLabelsFromSelfHostedRunnerForOrg: ["DELETE /orgs/{org}/actions/runners/{runner_id}/labels"],
+    removeAllCustomLabelsFromSelfHostedRunnerForRepo: ["DELETE /repos/{owner}/{repo}/actions/runners/{runner_id}/labels"],
+    removeCustomLabelFromSelfHostedRunnerForOrg: ["DELETE /orgs/{org}/actions/runners/{runner_id}/labels/{name}"],
+    removeCustomLabelFromSelfHostedRunnerForRepo: ["DELETE /repos/{owner}/{repo}/actions/runners/{runner_id}/labels/{name}"],
+    removeSelectedRepoFromOrgSecret: ["DELETE /orgs/{org}/actions/secrets/{secret_name}/repositories/{repository_id}"],
+    reviewPendingDeploymentsForRun: ["POST /repos/{owner}/{repo}/actions/runs/{run_id}/pending_deployments"],
+    setAllowedActionsOrganization: ["PUT /orgs/{org}/actions/permissions/selected-actions"],
+    setAllowedActionsRepository: ["PUT /repos/{owner}/{repo}/actions/permissions/selected-actions"],
+    setCustomLabelsForSelfHostedRunnerForOrg: ["PUT /orgs/{org}/actions/runners/{runner_id}/labels"],
+    setCustomLabelsForSelfHostedRunnerForRepo: ["PUT /repos/{owner}/{repo}/actions/runners/{runner_id}/labels"],
+    setGithubActionsDefaultWorkflowPermissionsEnterprise: ["PUT /enterprises/{enterprise}/actions/permissions/workflow"],
+    setGithubActionsDefaultWorkflowPermissionsOrganization: ["PUT /orgs/{org}/actions/permissions/workflow"],
+    setGithubActionsDefaultWorkflowPermissionsRepository: ["PUT /repos/{owner}/{repo}/actions/permissions/workflow"],
+    setGithubActionsPermissionsOrganization: ["PUT /orgs/{org}/actions/permissions"],
+    setGithubActionsPermissionsRepository: ["PUT /repos/{owner}/{repo}/actions/permissions"],
+    setSelectedReposForOrgSecret: ["PUT /orgs/{org}/actions/secrets/{secret_name}/repositories"],
+    setSelectedRepositoriesEnabledGithubActionsOrganization: ["PUT /orgs/{org}/actions/permissions/repositories"],
+    setWorkflowAccessToRepository: ["PUT /repos/{owner}/{repo}/actions/permissions/access"]
+  },
+  activity: {
+    checkRepoIsStarredByAuthenticatedUser: ["GET /user/starred/{owner}/{repo}"],
+    deleteRepoSubscription: ["DELETE /repos/{owner}/{repo}/subscription"],
+    deleteThreadSubscription: ["DELETE /notifications/threads/{thread_id}/subscription"],
+    getFeeds: ["GET /feeds"],
+    getRepoSubscription: ["GET /repos/{owner}/{repo}/subscription"],
+    getThread: ["GET /notifications/threads/{thread_id}"],
+    getThreadSubscriptionForAuthenticatedUser: ["GET /notifications/threads/{thread_id}/subscription"],
+    listEventsForAuthenticatedUser: ["GET /users/{username}/events"],
+    listNotificationsForAuthenticatedUser: ["GET /notifications"],
+    listOrgEventsForAuthenticatedUser: ["GET /users/{username}/events/orgs/{org}"],
+    listPublicEvents: ["GET /events"],
+    listPublicEventsForRepoNetwork: ["GET /networks/{owner}/{repo}/events"],
+    listPublicEventsForUser: ["GET /users/{username}/events/public"],
+    listPublicOrgEvents: ["GET /orgs/{org}/events"],
+    listReceivedEventsForUser: ["GET /users/{username}/received_events"],
+    listReceivedPublicEventsForUser: ["GET /users/{username}/received_events/public"],
+    listRepoEvents: ["GET /repos/{owner}/{repo}/events"],
+    listRepoNotificationsForAuthenticatedUser: ["GET /repos/{owner}/{repo}/notifications"],
+    listReposStarredByAuthenticatedUser: ["GET /user/starred"],
+    listReposStarredByUser: ["GET /users/{username}/starred"],
+    listReposWatchedByUser: ["GET /users/{username}/subscriptions"],
+    listStargazersForRepo: ["GET /repos/{owner}/{repo}/stargazers"],
+    listWatchedReposForAuthenticatedUser: ["GET /user/subscriptions"],
+    listWatchersForRepo: ["GET /repos/{owner}/{repo}/subscribers"],
+    markNotificationsAsRead: ["PUT /notifications"],
+    markRepoNotificationsAsRead: ["PUT /repos/{owner}/{repo}/notifications"],
+    markThreadAsRead: ["PATCH /notifications/threads/{thread_id}"],
+    setRepoSubscription: ["PUT /repos/{owner}/{repo}/subscription"],
+    setThreadSubscription: ["PUT /notifications/threads/{thread_id}/subscription"],
+    starRepoForAuthenticatedUser: ["PUT /user/starred/{owner}/{repo}"],
+    unstarRepoForAuthenticatedUser: ["DELETE /user/starred/{owner}/{repo}"]
+  },
+  apps: {
+    addRepoToInstallation: ["PUT /user/installations/{installation_id}/repositories/{repository_id}", {}, {
+      renamed: ["apps", "addRepoToInstallationForAuthenticatedUser"]
+    }],
+    addRepoToInstallationForAuthenticatedUser: ["PUT /user/installations/{installation_id}/repositories/{repository_id}"],
+    checkToken: ["POST /applications/{client_id}/token"],
+    createFromManifest: ["POST /app-manifests/{code}/conversions"],
+    createInstallationAccessToken: ["POST /app/installations/{installation_id}/access_tokens"],
+    deleteAuthorization: ["DELETE /applications/{client_id}/grant"],
+    deleteInstallation: ["DELETE /app/installations/{installation_id}"],
+    deleteToken: ["DELETE /applications/{client_id}/token"],
+    getAuthenticated: ["GET /app"],
+    getBySlug: ["GET /apps/{app_slug}"],
+    getInstallation: ["GET /app/installations/{installation_id}"],
+    getOrgInstallation: ["GET /orgs/{org}/installation"],
+    getRepoInstallation: ["GET /repos/{owner}/{repo}/installation"],
+    getSubscriptionPlanForAccount: ["GET /marketplace_listing/accounts/{account_id}"],
+    getSubscriptionPlanForAccountStubbed: ["GET /marketplace_listing/stubbed/accounts/{account_id}"],
+    getUserInstallation: ["GET /users/{username}/installation"],
+    getWebhookConfigForApp: ["GET /app/hook/config"],
+    getWebhookDelivery: ["GET /app/hook/deliveries/{delivery_id}"],
+    listAccountsForPlan: ["GET /marketplace_listing/plans/{plan_id}/accounts"],
+    listAccountsForPlanStubbed: ["GET /marketplace_listing/stubbed/plans/{plan_id}/accounts"],
+    listInstallationReposForAuthenticatedUser: ["GET /user/installations/{installation_id}/repositories"],
+    listInstallations: ["GET /app/installations"],
+    listInstallationsForAuthenticatedUser: ["GET /user/installations"],
+    listPlans: ["GET /marketplace_listing/plans"],
+    listPlansStubbed: ["GET /marketplace_listing/stubbed/plans"],
+    listReposAccessibleToInstallation: ["GET /installation/repositories"],
+    listSubscriptionsForAuthenticatedUser: ["GET /user/marketplace_purchases"],
+    listSubscriptionsForAuthenticatedUserStubbed: ["GET /user/marketplace_purchases/stubbed"],
+    listWebhookDeliveries: ["GET /app/hook/deliveries"],
+    redeliverWebhookDelivery: ["POST /app/hook/deliveries/{delivery_id}/attempts"],
+    removeRepoFromInstallation: ["DELETE /user/installations/{installation_id}/repositories/{repository_id}", {}, {
+      renamed: ["apps", "removeRepoFromInstallationForAuthenticatedUser"]
+    }],
+    removeRepoFromInstallationForAuthenticatedUser: ["DELETE /user/installations/{installation_id}/repositories/{repository_id}"],
+    resetToken: ["PATCH /applications/{client_id}/token"],
+    revokeInstallationAccessToken: ["DELETE /installation/token"],
+    scopeToken: ["POST /applications/{client_id}/token/scoped"],
+    suspendInstallation: ["PUT /app/installations/{installation_id}/suspended"],
+    unsuspendInstallation: ["DELETE /app/installations/{installation_id}/suspended"],
+    updateWebhookConfigForApp: ["PATCH /app/hook/config"]
+  },
+  billing: {
+    getGithubActionsBillingOrg: ["GET /orgs/{org}/settings/billing/actions"],
+    getGithubActionsBillingUser: ["GET /users/{username}/settings/billing/actions"],
+    getGithubAdvancedSecurityBillingGhe: ["GET /enterprises/{enterprise}/settings/billing/advanced-security"],
+    getGithubAdvancedSecurityBillingOrg: ["GET /orgs/{org}/settings/billing/advanced-security"],
+    getGithubPackagesBillingOrg: ["GET /orgs/{org}/settings/billing/packages"],
+    getGithubPackagesBillingUser: ["GET /users/{username}/settings/billing/packages"],
+    getSharedStorageBillingOrg: ["GET /orgs/{org}/settings/billing/shared-storage"],
+    getSharedStorageBillingUser: ["GET /users/{username}/settings/billing/shared-storage"]
+  },
+  checks: {
+    create: ["POST /repos/{owner}/{repo}/check-runs"],
+    createSuite: ["POST /repos/{owner}/{repo}/check-suites"],
+    get: ["GET /repos/{owner}/{repo}/check-runs/{check_run_id}"],
+    getSuite: ["GET /repos/{owner}/{repo}/check-suites/{check_suite_id}"],
+    listAnnotations: ["GET /repos/{owner}/{repo}/check-runs/{check_run_id}/annotations"],
+    listForRef: ["GET /repos/{owner}/{repo}/commits/{ref}/check-runs"],
+    listForSuite: ["GET /repos/{owner}/{repo}/check-suites/{check_suite_id}/check-runs"],
+    listSuitesForRef: ["GET /repos/{owner}/{repo}/commits/{ref}/check-suites"],
+    rerequestRun: ["POST /repos/{owner}/{repo}/check-runs/{check_run_id}/rerequest"],
+    rerequestSuite: ["POST /repos/{owner}/{repo}/check-suites/{check_suite_id}/rerequest"],
+    setSuitesPreferences: ["PATCH /repos/{owner}/{repo}/check-suites/preferences"],
+    update: ["PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}"]
+  },
+  codeScanning: {
+    deleteAnalysis: ["DELETE /repos/{owner}/{repo}/code-scanning/analyses/{analysis_id}{?confirm_delete}"],
+    getAlert: ["GET /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}", {}, {
+      renamedParameters: {
+        alert_id: "alert_number"
+      }
+    }],
+    getAnalysis: ["GET /repos/{owner}/{repo}/code-scanning/analyses/{analysis_id}"],
+    getCodeqlDatabase: ["GET /repos/{owner}/{repo}/code-scanning/codeql/databases/{language}"],
+    getSarif: ["GET /repos/{owner}/{repo}/code-scanning/sarifs/{sarif_id}"],
+    listAlertInstances: ["GET /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/instances"],
+    listAlertsForEnterprise: ["GET /enterprises/{enterprise}/code-scanning/alerts"],
+    listAlertsForOrg: ["GET /orgs/{org}/code-scanning/alerts"],
+    listAlertsForRepo: ["GET /repos/{owner}/{repo}/code-scanning/alerts"],
+    listAlertsInstances: ["GET /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/instances", {}, {
+      renamed: ["codeScanning", "listAlertInstances"]
+    }],
+    listCodeqlDatabases: ["GET /repos/{owner}/{repo}/code-scanning/codeql/databases"],
+    listRecentAnalyses: ["GET /repos/{owner}/{repo}/code-scanning/analyses"],
+    updateAlert: ["PATCH /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}"],
+    uploadSarif: ["POST /repos/{owner}/{repo}/code-scanning/sarifs"]
+  },
+  codesOfConduct: {
+    getAllCodesOfConduct: ["GET /codes_of_conduct"],
+    getConductCode: ["GET /codes_of_conduct/{key}"]
+  },
+  codespaces: {
+    addRepositoryForSecretForAuthenticatedUser: ["PUT /user/codespaces/secrets/{secret_name}/repositories/{repository_id}"],
+    addSelectedRepoToOrgSecret: ["PUT /organizations/{org}/codespaces/secrets/{secret_name}/repositories/{repository_id}"],
+    codespaceMachinesForAuthenticatedUser: ["GET /user/codespaces/{codespace_name}/machines"],
+    createForAuthenticatedUser: ["POST /user/codespaces"],
+    createOrUpdateOrgSecret: ["PUT /organizations/{org}/codespaces/secrets/{secret_name}"],
+    createOrUpdateRepoSecret: ["PUT /repos/{owner}/{repo}/codespaces/secrets/{secret_name}"],
+    createOrUpdateSecretForAuthenticatedUser: ["PUT /user/codespaces/secrets/{secret_name}"],
+    createWithPrForAuthenticatedUser: ["POST /repos/{owner}/{repo}/pulls/{pull_number}/codespaces"],
+    createWithRepoForAuthenticatedUser: ["POST /repos/{owner}/{repo}/codespaces"],
+    deleteForAuthenticatedUser: ["DELETE /user/codespaces/{codespace_name}"],
+    deleteFromOrganization: ["DELETE /orgs/{org}/members/{username}/codespaces/{codespace_name}"],
+    deleteOrgSecret: ["DELETE /organizations/{org}/codespaces/secrets/{secret_name}"],
+    deleteRepoSecret: ["DELETE /repos/{owner}/{repo}/codespaces/secrets/{secret_name}"],
+    deleteSecretForAuthenticatedUser: ["DELETE /user/codespaces/secrets/{secret_name}"],
+    exportForAuthenticatedUser: ["POST /user/codespaces/{codespace_name}/exports"],
+    getExportDetailsForAuthenticatedUser: ["GET /user/codespaces/{codespace_name}/exports/{export_id}"],
+    getForAuthenticatedUser: ["GET /user/codespaces/{codespace_name}"],
+    getOrgPublicKey: ["GET /organizations/{org}/codespaces/secrets/public-key"],
+    getOrgSecret: ["GET /organizations/{org}/codespaces/secrets/{secret_name}"],
+    getPublicKeyForAuthenticatedUser: ["GET /user/codespaces/secrets/public-key"],
+    getRepoPublicKey: ["GET /repos/{owner}/{repo}/codespaces/secrets/public-key"],
+    getRepoSecret: ["GET /repos/{owner}/{repo}/codespaces/secrets/{secret_name}"],
+    getSecretForAuthenticatedUser: ["GET /user/codespaces/secrets/{secret_name}"],
+    listDevcontainersInRepositoryForAuthenticatedUser: ["GET /repos/{owner}/{repo}/codespaces/devcontainers"],
+    listForAuthenticatedUser: ["GET /user/codespaces"],
+    listInOrganization: ["GET /orgs/{org}/codespaces", {}, {
+      renamedParameters: {
+        org_id: "org"
+      }
+    }],
+    listInRepositoryForAuthenticatedUser: ["GET /repos/{owner}/{repo}/codespaces"],
+    listOrgSecrets: ["GET /organizations/{org}/codespaces/secrets"],
+    listRepoSecrets: ["GET /repos/{owner}/{repo}/codespaces/secrets"],
+    listRepositoriesForSecretForAuthenticatedUser: ["GET /user/codespaces/secrets/{secret_name}/repositories"],
+    listSecretsForAuthenticatedUser: ["GET /user/codespaces/secrets"],
+    listSelectedReposForOrgSecret: ["GET /organizations/{org}/codespaces/secrets/{secret_name}/repositories"],
+    preFlightWithRepoForAuthenticatedUser: ["GET /repos/{owner}/{repo}/codespaces/new"],
+    removeRepositoryForSecretForAuthenticatedUser: ["DELETE /user/codespaces/secrets/{secret_name}/repositories/{repository_id}"],
+    removeSelectedRepoFromOrgSecret: ["DELETE /organizations/{org}/codespaces/secrets/{secret_name}/repositories/{repository_id}"],
+    repoMachinesForAuthenticatedUser: ["GET /repos/{owner}/{repo}/codespaces/machines"],
+    setRepositoriesForSecretForAuthenticatedUser: ["PUT /user/codespaces/secrets/{secret_name}/repositories"],
+    setSelectedReposForOrgSecret: ["PUT /organizations/{org}/codespaces/secrets/{secret_name}/repositories"],
+    startForAuthenticatedUser: ["POST /user/codespaces/{codespace_name}/start"],
+    stopForAuthenticatedUser: ["POST /user/codespaces/{codespace_name}/stop"],
+    stopInOrganization: ["POST /orgs/{org}/members/{username}/codespaces/{codespace_name}/stop"],
+    updateForAuthenticatedUser: ["PATCH /user/codespaces/{codespace_name}"]
+  },
+  dependabot: {
+    addSelectedRepoToOrgSecret: ["PUT /orgs/{org}/dependabot/secrets/{secret_name}/repositories/{repository_id}"],
+    createOrUpdateOrgSecret: ["PUT /orgs/{org}/dependabot/secrets/{secret_name}"],
+    createOrUpdateRepoSecret: ["PUT /repos/{owner}/{repo}/dependabot/secrets/{secret_name}"],
+    deleteOrgSecret: ["DELETE /orgs/{org}/dependabot/secrets/{secret_name}"],
+    deleteRepoSecret: ["DELETE /repos/{owner}/{repo}/dependabot/secrets/{secret_name}"],
+    getAlert: ["GET /repos/{owner}/{repo}/dependabot/alerts/{alert_number}"],
+    getOrgPublicKey: ["GET /orgs/{org}/dependabot/secrets/public-key"],
+    getOrgSecret: ["GET /orgs/{org}/dependabot/secrets/{secret_name}"],
+    getRepoPublicKey: ["GET /repos/{owner}/{repo}/dependabot/secrets/public-key"],
+    getRepoSecret: ["GET /repos/{owner}/{repo}/dependabot/secrets/{secret_name}"],
+    listAlertsForRepo: ["GET /repos/{owner}/{repo}/dependabot/alerts"],
+    listOrgSecrets: ["GET /orgs/{org}/dependabot/secrets"],
+    listRepoSecrets: ["GET /repos/{owner}/{repo}/dependabot/secrets"],
+    listSelectedReposForOrgSecret: ["GET /orgs/{org}/dependabot/secrets/{secret_name}/repositories"],
+    removeSelectedRepoFromOrgSecret: ["DELETE /orgs/{org}/dependabot/secrets/{secret_name}/repositories/{repository_id}"],
+    setSelectedReposForOrgSecret: ["PUT /orgs/{org}/dependabot/secrets/{secret_name}/repositories"],
+    updateAlert: ["PATCH /repos/{owner}/{repo}/dependabot/alerts/{alert_number}"]
+  },
+  dependencyGraph: {
+    createRepositorySnapshot: ["POST /repos/{owner}/{repo}/dependency-graph/snapshots"],
+    diffRange: ["GET /repos/{owner}/{repo}/dependency-graph/compare/{basehead}"]
+  },
+  emojis: {
+    get: ["GET /emojis"]
+  },
+  enterpriseAdmin: {
+    addCustomLabelsToSelfHostedRunnerForEnterprise: ["POST /enterprises/{enterprise}/actions/runners/{runner_id}/labels"],
+    disableSelectedOrganizationGithubActionsEnterprise: ["DELETE /enterprises/{enterprise}/actions/permissions/organizations/{org_id}"],
+    enableSelectedOrganizationGithubActionsEnterprise: ["PUT /enterprises/{enterprise}/actions/permissions/organizations/{org_id}"],
+    getAllowedActionsEnterprise: ["GET /enterprises/{enterprise}/actions/permissions/selected-actions"],
+    getGithubActionsPermissionsEnterprise: ["GET /enterprises/{enterprise}/actions/permissions"],
+    getServerStatistics: ["GET /enterprise-installation/{enterprise_or_org}/server-statistics"],
+    listLabelsForSelfHostedRunnerForEnterprise: ["GET /enterprises/{enterprise}/actions/runners/{runner_id}/labels"],
+    listSelectedOrganizationsEnabledGithubActionsEnterprise: ["GET /enterprises/{enterprise}/actions/permissions/organizations"],
+    removeAllCustomLabelsFromSelfHostedRunnerForEnterprise: ["DELETE /enterprises/{enterprise}/actions/runners/{runner_id}/labels"],
+    removeCustomLabelFromSelfHostedRunnerForEnterprise: ["DELETE /enterprises/{enterprise}/actions/runners/{runner_id}/labels/{name}"],
+    setAllowedActionsEnterprise: ["PUT /enterprises/{enterprise}/actions/permissions/selected-actions"],
+    setCustomLabelsForSelfHostedRunnerForEnterprise: ["PUT /enterprises/{enterprise}/actions/runners/{runner_id}/labels"],
+    setGithubActionsPermissionsEnterprise: ["PUT /enterprises/{enterprise}/actions/permissions"],
+    setSelectedOrganizationsEnabledGithubActionsEnterprise: ["PUT /enterprises/{enterprise}/actions/permissions/organizations"]
+  },
+  gists: {
+    checkIsStarred: ["GET /gists/{gist_id}/star"],
+    create: ["POST /gists"],
+    createComment: ["POST /gists/{gist_id}/comments"],
+    delete: ["DELETE /gists/{gist_id}"],
+    deleteComment: ["DELETE /gists/{gist_id}/comments/{comment_id}"],
+    fork: ["POST /gists/{gist_id}/forks"],
+    get: ["GET /gists/{gist_id}"],
+    getComment: ["GET /gists/{gist_id}/comments/{comment_id}"],
+    getRevision: ["GET /gists/{gist_id}/{sha}"],
+    list: ["GET /gists"],
+    listComments: ["GET /gists/{gist_id}/comments"],
+    listCommits: ["GET /gists/{gist_id}/commits"],
+    listForUser: ["GET /users/{username}/gists"],
+    listForks: ["GET /gists/{gist_id}/forks"],
+    listPublic: ["GET /gists/public"],
+    listStarred: ["GET /gists/starred"],
+    star: ["PUT /gists/{gist_id}/star"],
+    unstar: ["DELETE /gists/{gist_id}/star"],
+    update: ["PATCH /gists/{gist_id}"],
+    updateComment: ["PATCH /gists/{gist_id}/comments/{comment_id}"]
+  },
+  git: {
+    createBlob: ["POST /repos/{owner}/{repo}/git/blobs"],
+    createCommit: ["POST /repos/{owner}/{repo}/git/commits"],
+    createRef: ["POST /repos/{owner}/{repo}/git/refs"],
+    createTag: ["POST /repos/{owner}/{repo}/git/tags"],
+    createTree: ["POST /repos/{owner}/{repo}/git/trees"],
+    deleteRef: ["DELETE /repos/{owner}/{repo}/git/refs/{ref}"],
+    getBlob: ["GET /repos/{owner}/{repo}/git/blobs/{file_sha}"],
+    getCommit: ["GET /repos/{owner}/{repo}/git/commits/{commit_sha}"],
+    getRef: ["GET /repos/{owner}/{repo}/git/ref/{ref}"],
+    getTag: ["GET /repos/{owner}/{repo}/git/tags/{tag_sha}"],
+    getTree: ["GET /repos/{owner}/{repo}/git/trees/{tree_sha}"],
+    listMatchingRefs: ["GET /repos/{owner}/{repo}/git/matching-refs/{ref}"],
+    updateRef: ["PATCH /repos/{owner}/{repo}/git/refs/{ref}"]
+  },
+  gitignore: {
+    getAllTemplates: ["GET /gitignore/templates"],
+    getTemplate: ["GET /gitignore/templates/{name}"]
+  },
+  interactions: {
+    getRestrictionsForAuthenticatedUser: ["GET /user/interaction-limits"],
+    getRestrictionsForOrg: ["GET /orgs/{org}/interaction-limits"],
+    getRestrictionsForRepo: ["GET /repos/{owner}/{repo}/interaction-limits"],
+    getRestrictionsForYourPublicRepos: ["GET /user/interaction-limits", {}, {
+      renamed: ["interactions", "getRestrictionsForAuthenticatedUser"]
+    }],
+    removeRestrictionsForAuthenticatedUser: ["DELETE /user/interaction-limits"],
+    removeRestrictionsForOrg: ["DELETE /orgs/{org}/interaction-limits"],
+    removeRestrictionsForRepo: ["DELETE /repos/{owner}/{repo}/interaction-limits"],
+    removeRestrictionsForYourPublicRepos: ["DELETE /user/interaction-limits", {}, {
+      renamed: ["interactions", "removeRestrictionsForAuthenticatedUser"]
+    }],
+    setRestrictionsForAuthenticatedUser: ["PUT /user/interaction-limits"],
+    setRestrictionsForOrg: ["PUT /orgs/{org}/interaction-limits"],
+    setRestrictionsForRepo: ["PUT /repos/{owner}/{repo}/interaction-limits"],
+    setRestrictionsForYourPublicRepos: ["PUT /user/interaction-limits", {}, {
+      renamed: ["interactions", "setRestrictionsForAuthenticatedUser"]
+    }]
+  },
+  issues: {
+    addAssignees: ["POST /repos/{owner}/{repo}/issues/{issue_number}/assignees"],
+    addLabels: ["POST /repos/{owner}/{repo}/issues/{issue_number}/labels"],
+    checkUserCanBeAssigned: ["GET /repos/{owner}/{repo}/assignees/{assignee}"],
+    create: ["POST /repos/{owner}/{repo}/issues"],
+    createComment: ["POST /repos/{owner}/{repo}/issues/{issue_number}/comments"],
+    createLabel: ["POST /repos/{owner}/{repo}/labels"],
+    createMilestone: ["POST /repos/{owner}/{repo}/milestones"],
+    deleteComment: ["DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}"],
+    deleteLabel: ["DELETE /repos/{owner}/{repo}/labels/{name}"],
+    deleteMilestone: ["DELETE /repos/{owner}/{repo}/milestones/{milestone_number}"],
+    get: ["GET /repos/{owner}/{repo}/issues/{issue_number}"],
+    getComment: ["GET /repos/{owner}/{repo}/issues/comments/{comment_id}"],
+    getEvent: ["GET /repos/{owner}/{repo}/issues/events/{event_id}"],
+    getLabel: ["GET /repos/{owner}/{repo}/labels/{name}"],
+    getMilestone: ["GET /repos/{owner}/{repo}/milestones/{milestone_number}"],
+    list: ["GET /issues"],
+    listAssignees: ["GET /repos/{owner}/{repo}/assignees"],
+    listComments: ["GET /repos/{owner}/{repo}/issues/{issue_number}/comments"],
+    listCommentsForRepo: ["GET /repos/{owner}/{repo}/issues/comments"],
+    listEvents: ["GET /repos/{owner}/{repo}/issues/{issue_number}/events"],
+    listEventsForRepo: ["GET /repos/{owner}/{repo}/issues/events"],
+    listEventsForTimeline: ["GET /repos/{owner}/{repo}/issues/{issue_number}/timeline"],
+    listForAuthenticatedUser: ["GET /user/issues"],
+    listForOrg: ["GET /orgs/{org}/issues"],
+    listForRepo: ["GET /repos/{owner}/{repo}/issues"],
+    listLabelsForMilestone: ["GET /repos/{owner}/{repo}/milestones/{milestone_number}/labels"],
+    listLabelsForRepo: ["GET /repos/{owner}/{repo}/labels"],
+    listLabelsOnIssue: ["GET /repos/{owner}/{repo}/issues/{issue_number}/labels"],
+    listMilestones: ["GET /repos/{owner}/{repo}/milestones"],
+    lock: ["PUT /repos/{owner}/{repo}/issues/{issue_number}/lock"],
+    removeAllLabels: ["DELETE /repos/{owner}/{repo}/issues/{issue_number}/labels"],
+    removeAssignees: ["DELETE /repos/{owner}/{repo}/issues/{issue_number}/assignees"],
+    removeLabel: ["DELETE /repos/{owner}/{repo}/issues/{issue_number}/labels/{name}"],
+    setLabels: ["PUT /repos/{owner}/{repo}/issues/{issue_number}/labels"],
+    unlock: ["DELETE /repos/{owner}/{repo}/issues/{issue_number}/lock"],
+    update: ["PATCH /repos/{owner}/{repo}/issues/{issue_number}"],
+    updateComment: ["PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}"],
+    updateLabel: ["PATCH /repos/{owner}/{repo}/labels/{name}"],
+    updateMilestone: ["PATCH /repos/{owner}/{repo}/milestones/{milestone_number}"]
+  },
+  licenses: {
+    get: ["GET /licenses/{license}"],
+    getAllCommonlyUsed: ["GET /licenses"],
+    getForRepo: ["GET /repos/{owner}/{repo}/license"]
+  },
+  markdown: {
+    render: ["POST /markdown"],
+    renderRaw: ["POST /markdown/raw", {
+      headers: {
+        "content-type": "text/plain; charset=utf-8"
+      }
+    }]
+  },
+  meta: {
+    get: ["GET /meta"],
+    getOctocat: ["GET /octocat"],
+    getZen: ["GET /zen"],
+    root: ["GET /"]
+  },
+  migrations: {
+    cancelImport: ["DELETE /repos/{owner}/{repo}/import"],
+    deleteArchiveForAuthenticatedUser: ["DELETE /user/migrations/{migration_id}/archive"],
+    deleteArchiveForOrg: ["DELETE /orgs/{org}/migrations/{migration_id}/archive"],
+    downloadArchiveForOrg: ["GET /orgs/{org}/migrations/{migration_id}/archive"],
+    getArchiveForAuthenticatedUser: ["GET /user/migrations/{migration_id}/archive"],
+    getCommitAuthors: ["GET /repos/{owner}/{repo}/import/authors"],
+    getImportStatus: ["GET /repos/{owner}/{repo}/import"],
+    getLargeFiles: ["GET /repos/{owner}/{repo}/import/large_files"],
+    getStatusForAuthenticatedUser: ["GET /user/migrations/{migration_id}"],
+    getStatusForOrg: ["GET /orgs/{org}/migrations/{migration_id}"],
+    listForAuthenticatedUser: ["GET /user/migrations"],
+    listForOrg: ["GET /orgs/{org}/migrations"],
+    listReposForAuthenticatedUser: ["GET /user/migrations/{migration_id}/repositories"],
+    listReposForOrg: ["GET /orgs/{org}/migrations/{migration_id}/repositories"],
+    listReposForUser: ["GET /user/migrations/{migration_id}/repositories", {}, {
+      renamed: ["migrations", "listReposForAuthenticatedUser"]
+    }],
+    mapCommitAuthor: ["PATCH /repos/{owner}/{repo}/import/authors/{author_id}"],
+    setLfsPreference: ["PATCH /repos/{owner}/{repo}/import/lfs"],
+    startForAuthenticatedUser: ["POST /user/migrations"],
+    startForOrg: ["POST /orgs/{org}/migrations"],
+    startImport: ["PUT /repos/{owner}/{repo}/import"],
+    unlockRepoForAuthenticatedUser: ["DELETE /user/migrations/{migration_id}/repos/{repo_name}/lock"],
+    unlockRepoForOrg: ["DELETE /orgs/{org}/migrations/{migration_id}/repos/{repo_name}/lock"],
+    updateImport: ["PATCH /repos/{owner}/{repo}/import"]
+  },
+  orgs: {
+    addSecurityManagerTeam: ["PUT /orgs/{org}/security-managers/teams/{team_slug}"],
+    blockUser: ["PUT /orgs/{org}/blocks/{username}"],
+    cancelInvitation: ["DELETE /orgs/{org}/invitations/{invitation_id}"],
+    checkBlockedUser: ["GET /orgs/{org}/blocks/{username}"],
+    checkMembershipForUser: ["GET /orgs/{org}/members/{username}"],
+    checkPublicMembershipForUser: ["GET /orgs/{org}/public_members/{username}"],
+    convertMemberToOutsideCollaborator: ["PUT /orgs/{org}/outside_collaborators/{username}"],
+    createCustomRole: ["POST /orgs/{org}/custom_roles"],
+    createInvitation: ["POST /orgs/{org}/invitations"],
+    createWebhook: ["POST /orgs/{org}/hooks"],
+    deleteCustomRole: ["DELETE /orgs/{org}/custom_roles/{role_id}"],
+    deleteWebhook: ["DELETE /orgs/{org}/hooks/{hook_id}"],
+    enableOrDisableSecurityProductOnAllOrgRepos: ["POST /orgs/{org}/{security_product}/{enablement}"],
+    get: ["GET /orgs/{org}"],
+    getMembershipForAuthenticatedUser: ["GET /user/memberships/orgs/{org}"],
+    getMembershipForUser: ["GET /orgs/{org}/memberships/{username}"],
+    getWebhook: ["GET /orgs/{org}/hooks/{hook_id}"],
+    getWebhookConfigForOrg: ["GET /orgs/{org}/hooks/{hook_id}/config"],
+    getWebhookDelivery: ["GET /orgs/{org}/hooks/{hook_id}/deliveries/{delivery_id}"],
+    list: ["GET /organizations"],
+    listAppInstallations: ["GET /orgs/{org}/installations"],
+    listBlockedUsers: ["GET /orgs/{org}/blocks"],
+    listCustomRoles: ["GET /organizations/{organization_id}/custom_roles"],
+    listFailedInvitations: ["GET /orgs/{org}/failed_invitations"],
+    listFineGrainedPermissions: ["GET /orgs/{org}/fine_grained_permissions"],
+    listForAuthenticatedUser: ["GET /user/orgs"],
+    listForUser: ["GET /users/{username}/orgs"],
+    listInvitationTeams: ["GET /orgs/{org}/invitations/{invitation_id}/teams"],
+    listMembers: ["GET /orgs/{org}/members"],
+    listMembershipsForAuthenticatedUser: ["GET /user/memberships/orgs"],
+    listOutsideCollaborators: ["GET /orgs/{org}/outside_collaborators"],
+    listPendingInvitations: ["GET /orgs/{org}/invitations"],
+    listPublicMembers: ["GET /orgs/{org}/public_members"],
+    listSecurityManagerTeams: ["GET /orgs/{org}/security-managers"],
+    listWebhookDeliveries: ["GET /orgs/{org}/hooks/{hook_id}/deliveries"],
+    listWebhooks: ["GET /orgs/{org}/hooks"],
+    pingWebhook: ["POST /orgs/{org}/hooks/{hook_id}/pings"],
+    redeliverWebhookDelivery: ["POST /orgs/{org}/hooks/{hook_id}/deliveries/{delivery_id}/attempts"],
+    removeMember: ["DELETE /orgs/{org}/members/{username}"],
+    removeMembershipForUser: ["DELETE /orgs/{org}/memberships/{username}"],
+    removeOutsideCollaborator: ["DELETE /orgs/{org}/outside_collaborators/{username}"],
+    removePublicMembershipForAuthenticatedUser: ["DELETE /orgs/{org}/public_members/{username}"],
+    removeSecurityManagerTeam: ["DELETE /orgs/{org}/security-managers/teams/{team_slug}"],
+    setMembershipForUser: ["PUT /orgs/{org}/memberships/{username}"],
+    setPublicMembershipForAuthenticatedUser: ["PUT /orgs/{org}/public_members/{username}"],
+    unblockUser: ["DELETE /orgs/{org}/blocks/{username}"],
+    update: ["PATCH /orgs/{org}"],
+    updateCustomRole: ["PATCH /orgs/{org}/custom_roles/{role_id}"],
+    updateMembershipForAuthenticatedUser: ["PATCH /user/memberships/orgs/{org}"],
+    updateWebhook: ["PATCH /orgs/{org}/hooks/{hook_id}"],
+    updateWebhookConfigForOrg: ["PATCH /orgs/{org}/hooks/{hook_id}/config"]
+  },
+  packages: {
+    deletePackageForAuthenticatedUser: ["DELETE /user/packages/{package_type}/{package_name}"],
+    deletePackageForOrg: ["DELETE /orgs/{org}/packages/{package_type}/{package_name}"],
+    deletePackageForUser: ["DELETE /users/{username}/packages/{package_type}/{package_name}"],
+    deletePackageVersionForAuthenticatedUser: ["DELETE /user/packages/{package_type}/{package_name}/versions/{package_version_id}"],
+    deletePackageVersionForOrg: ["DELETE /orgs/{org}/packages/{package_type}/{package_name}/versions/{package_version_id}"],
+    deletePackageVersionForUser: ["DELETE /users/{username}/packages/{package_type}/{package_name}/versions/{package_version_id}"],
+    getAllPackageVersionsForAPackageOwnedByAnOrg: ["GET /orgs/{org}/packages/{package_type}/{package_name}/versions", {}, {
+      renamed: ["packages", "getAllPackageVersionsForPackageOwnedByOrg"]
+    }],
+    getAllPackageVersionsForAPackageOwnedByTheAuthenticatedUser: ["GET /user/packages/{package_type}/{package_name}/versions", {}, {
+      renamed: ["packages", "getAllPackageVersionsForPackageOwnedByAuthenticatedUser"]
+    }],
+    getAllPackageVersionsForPackageOwnedByAuthenticatedUser: ["GET /user/packages/{package_type}/{package_name}/versions"],
+    getAllPackageVersionsForPackageOwnedByOrg: ["GET /orgs/{org}/packages/{package_type}/{package_name}/versions"],
+    getAllPackageVersionsForPackageOwnedByUser: ["GET /users/{username}/packages/{package_type}/{package_name}/versions"],
+    getPackageForAuthenticatedUser: ["GET /user/packages/{package_type}/{package_name}"],
+    getPackageForOrganization: ["GET /orgs/{org}/packages/{package_type}/{package_name}"],
+    getPackageForUser: ["GET /users/{username}/packages/{package_type}/{package_name}"],
+    getPackageVersionForAuthenticatedUser: ["GET /user/packages/{package_type}/{package_name}/versions/{package_version_id}"],
+    getPackageVersionForOrganization: ["GET /orgs/{org}/packages/{package_type}/{package_name}/versions/{package_version_id}"],
+    getPackageVersionForUser: ["GET /users/{username}/packages/{package_type}/{package_name}/versions/{package_version_id}"],
+    listPackagesForAuthenticatedUser: ["GET /user/packages"],
+    listPackagesForOrganization: ["GET /orgs/{org}/packages"],
+    listPackagesForUser: ["GET /users/{username}/packages"],
+    restorePackageForAuthenticatedUser: ["POST /user/packages/{package_type}/{package_name}/restore{?token}"],
+    restorePackageForOrg: ["POST /orgs/{org}/packages/{package_type}/{package_name}/restore{?token}"],
+    restorePackageForUser: ["POST /users/{username}/packages/{package_type}/{package_name}/restore{?token}"],
+    restorePackageVersionForAuthenticatedUser: ["POST /user/packages/{package_type}/{package_name}/versions/{package_version_id}/restore"],
+    restorePackageVersionForOrg: ["POST /orgs/{org}/packages/{package_type}/{package_name}/versions/{package_version_id}/restore"],
+    restorePackageVersionForUser: ["POST /users/{username}/packages/{package_type}/{package_name}/versions/{package_version_id}/restore"]
+  },
+  projects: {
+    addCollaborator: ["PUT /projects/{project_id}/collaborators/{username}"],
+    createCard: ["POST /projects/columns/{column_id}/cards"],
+    createColumn: ["POST /projects/{project_id}/columns"],
+    createForAuthenticatedUser: ["POST /user/projects"],
+    createForOrg: ["POST /orgs/{org}/projects"],
+    createForRepo: ["POST /repos/{owner}/{repo}/projects"],
+    delete: ["DELETE /projects/{project_id}"],
+    deleteCard: ["DELETE /projects/columns/cards/{card_id}"],
+    deleteColumn: ["DELETE /projects/columns/{column_id}"],
+    get: ["GET /projects/{project_id}"],
+    getCard: ["GET /projects/columns/cards/{card_id}"],
+    getColumn: ["GET /projects/columns/{column_id}"],
+    getPermissionForUser: ["GET /projects/{project_id}/collaborators/{username}/permission"],
+    listCards: ["GET /projects/columns/{column_id}/cards"],
+    listCollaborators: ["GET /projects/{project_id}/collaborators"],
+    listColumns: ["GET /projects/{project_id}/columns"],
+    listForOrg: ["GET /orgs/{org}/projects"],
+    listForRepo: ["GET /repos/{owner}/{repo}/projects"],
+    listForUser: ["GET /users/{username}/projects"],
+    moveCard: ["POST /projects/columns/cards/{card_id}/moves"],
+    moveColumn: ["POST /projects/columns/{column_id}/moves"],
+    removeCollaborator: ["DELETE /projects/{project_id}/collaborators/{username}"],
+    update: ["PATCH /projects/{project_id}"],
+    updateCard: ["PATCH /projects/columns/cards/{card_id}"],
+    updateColumn: ["PATCH /projects/columns/{column_id}"]
+  },
+  pulls: {
+    checkIfMerged: ["GET /repos/{owner}/{repo}/pulls/{pull_number}/merge"],
+    create: ["POST /repos/{owner}/{repo}/pulls"],
+    createReplyForReviewComment: ["POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies"],
+    createReview: ["POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews"],
+    createReviewComment: ["POST /repos/{owner}/{repo}/pulls/{pull_number}/comments"],
+    deletePendingReview: ["DELETE /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}"],
+    deleteReviewComment: ["DELETE /repos/{owner}/{repo}/pulls/comments/{comment_id}"],
+    dismissReview: ["PUT /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/dismissals"],
+    get: ["GET /repos/{owner}/{repo}/pulls/{pull_number}"],
+    getReview: ["GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}"],
+    getReviewComment: ["GET /repos/{owner}/{repo}/pulls/comments/{comment_id}"],
+    list: ["GET /repos/{owner}/{repo}/pulls"],
+    listCommentsForReview: ["GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments"],
+    listCommits: ["GET /repos/{owner}/{repo}/pulls/{pull_number}/commits"],
+    listFiles: ["GET /repos/{owner}/{repo}/pulls/{pull_number}/files"],
+    listRequestedReviewers: ["GET /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers"],
+    listReviewComments: ["GET /repos/{owner}/{repo}/pulls/{pull_number}/comments"],
+    listReviewCommentsForRepo: ["GET /repos/{owner}/{repo}/pulls/comments"],
+    listReviews: ["GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews"],
+    merge: ["PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge"],
+    removeRequestedReviewers: ["DELETE /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers"],
+    requestReviewers: ["POST /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers"],
+    submitReview: ["POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/events"],
+    update: ["PATCH /repos/{owner}/{repo}/pulls/{pull_number}"],
+    updateBranch: ["PUT /repos/{owner}/{repo}/pulls/{pull_number}/update-branch"],
+    updateReview: ["PUT /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}"],
+    updateReviewComment: ["PATCH /repos/{owner}/{repo}/pulls/comments/{comment_id}"]
+  },
+  rateLimit: {
+    get: ["GET /rate_limit"]
+  },
+  reactions: {
+    createForCommitComment: ["POST /repos/{owner}/{repo}/comments/{comment_id}/reactions"],
+    createForIssue: ["POST /repos/{owner}/{repo}/issues/{issue_number}/reactions"],
+    createForIssueComment: ["POST /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions"],
+    createForPullRequestReviewComment: ["POST /repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions"],
+    createForRelease: ["POST /repos/{owner}/{repo}/releases/{release_id}/reactions"],
+    createForTeamDiscussionCommentInOrg: ["POST /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/comments/{comment_number}/reactions"],
+    createForTeamDiscussionInOrg: ["POST /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/reactions"],
+    deleteForCommitComment: ["DELETE /repos/{owner}/{repo}/comments/{comment_id}/reactions/{reaction_id}"],
+    deleteForIssue: ["DELETE /repos/{owner}/{repo}/issues/{issue_number}/reactions/{reaction_id}"],
+    deleteForIssueComment: ["DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions/{reaction_id}"],
+    deleteForPullRequestComment: ["DELETE /repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions/{reaction_id}"],
+    deleteForRelease: ["DELETE /repos/{owner}/{repo}/releases/{release_id}/reactions/{reaction_id}"],
+    deleteForTeamDiscussion: ["DELETE /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/reactions/{reaction_id}"],
+    deleteForTeamDiscussionComment: ["DELETE /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/comments/{comment_number}/reactions/{reaction_id}"],
+    listForCommitComment: ["GET /repos/{owner}/{repo}/comments/{comment_id}/reactions"],
+    listForIssue: ["GET /repos/{owner}/{repo}/issues/{issue_number}/reactions"],
+    listForIssueComment: ["GET /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions"],
+    listForPullRequestReviewComment: ["GET /repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions"],
+    listForRelease: ["GET /repos/{owner}/{repo}/releases/{release_id}/reactions"],
+    listForTeamDiscussionCommentInOrg: ["GET /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/comments/{comment_number}/reactions"],
+    listForTeamDiscussionInOrg: ["GET /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/reactions"]
+  },
+  repos: {
+    acceptInvitation: ["PATCH /user/repository_invitations/{invitation_id}", {}, {
+      renamed: ["repos", "acceptInvitationForAuthenticatedUser"]
+    }],
+    acceptInvitationForAuthenticatedUser: ["PATCH /user/repository_invitations/{invitation_id}"],
+    addAppAccessRestrictions: ["POST /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/apps", {}, {
+      mapToData: "apps"
+    }],
+    addCollaborator: ["PUT /repos/{owner}/{repo}/collaborators/{username}"],
+    addStatusCheckContexts: ["POST /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks/contexts", {}, {
+      mapToData: "contexts"
+    }],
+    addTeamAccessRestrictions: ["POST /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/teams", {}, {
+      mapToData: "teams"
+    }],
+    addUserAccessRestrictions: ["POST /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/users", {}, {
+      mapToData: "users"
+    }],
+    checkCollaborator: ["GET /repos/{owner}/{repo}/collaborators/{username}"],
+    checkVulnerabilityAlerts: ["GET /repos/{owner}/{repo}/vulnerability-alerts"],
+    codeownersErrors: ["GET /repos/{owner}/{repo}/codeowners/errors"],
+    compareCommits: ["GET /repos/{owner}/{repo}/compare/{base}...{head}"],
+    compareCommitsWithBasehead: ["GET /repos/{owner}/{repo}/compare/{basehead}"],
+    createAutolink: ["POST /repos/{owner}/{repo}/autolinks"],
+    createCommitComment: ["POST /repos/{owner}/{repo}/commits/{commit_sha}/comments"],
+    createCommitSignatureProtection: ["POST /repos/{owner}/{repo}/branches/{branch}/protection/required_signatures"],
+    createCommitStatus: ["POST /repos/{owner}/{repo}/statuses/{sha}"],
+    createDeployKey: ["POST /repos/{owner}/{repo}/keys"],
+    createDeployment: ["POST /repos/{owner}/{repo}/deployments"],
+    createDeploymentBranchPolicy: ["POST /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies"],
+    createDeploymentStatus: ["POST /repos/{owner}/{repo}/deployments/{deployment_id}/statuses"],
+    createDispatchEvent: ["POST /repos/{owner}/{repo}/dispatches"],
+    createForAuthenticatedUser: ["POST /user/repos"],
+    createFork: ["POST /repos/{owner}/{repo}/forks"],
+    createInOrg: ["POST /orgs/{org}/repos"],
+    createOrUpdateEnvironment: ["PUT /repos/{owner}/{repo}/environments/{environment_name}"],
+    createOrUpdateFileContents: ["PUT /repos/{owner}/{repo}/contents/{path}"],
+    createPagesDeployment: ["POST /repos/{owner}/{repo}/pages/deployment"],
+    createPagesSite: ["POST /repos/{owner}/{repo}/pages"],
+    createRelease: ["POST /repos/{owner}/{repo}/releases"],
+    createTagProtection: ["POST /repos/{owner}/{repo}/tags/protection"],
+    createUsingTemplate: ["POST /repos/{template_owner}/{template_repo}/generate"],
+    createWebhook: ["POST /repos/{owner}/{repo}/hooks"],
+    declineInvitation: ["DELETE /user/repository_invitations/{invitation_id}", {}, {
+      renamed: ["repos", "declineInvitationForAuthenticatedUser"]
+    }],
+    declineInvitationForAuthenticatedUser: ["DELETE /user/repository_invitations/{invitation_id}"],
+    delete: ["DELETE /repos/{owner}/{repo}"],
+    deleteAccessRestrictions: ["DELETE /repos/{owner}/{repo}/branches/{branch}/protection/restrictions"],
+    deleteAdminBranchProtection: ["DELETE /repos/{owner}/{repo}/branches/{branch}/protection/enforce_admins"],
+    deleteAnEnvironment: ["DELETE /repos/{owner}/{repo}/environments/{environment_name}"],
+    deleteAutolink: ["DELETE /repos/{owner}/{repo}/autolinks/{autolink_id}"],
+    deleteBranchProtection: ["DELETE /repos/{owner}/{repo}/branches/{branch}/protection"],
+    deleteCommitComment: ["DELETE /repos/{owner}/{repo}/comments/{comment_id}"],
+    deleteCommitSignatureProtection: ["DELETE /repos/{owner}/{repo}/branches/{branch}/protection/required_signatures"],
+    deleteDeployKey: ["DELETE /repos/{owner}/{repo}/keys/{key_id}"],
+    deleteDeployment: ["DELETE /repos/{owner}/{repo}/deployments/{deployment_id}"],
+    deleteDeploymentBranchPolicy: ["DELETE /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies/{branch_policy_id}"],
+    deleteFile: ["DELETE /repos/{owner}/{repo}/contents/{path}"],
+    deleteInvitation: ["DELETE /repos/{owner}/{repo}/invitations/{invitation_id}"],
+    deletePagesSite: ["DELETE /repos/{owner}/{repo}/pages"],
+    deletePullRequestReviewProtection: ["DELETE /repos/{owner}/{repo}/branches/{branch}/protection/required_pull_request_reviews"],
+    deleteRelease: ["DELETE /repos/{owner}/{repo}/releases/{release_id}"],
+    deleteReleaseAsset: ["DELETE /repos/{owner}/{repo}/releases/assets/{asset_id}"],
+    deleteTagProtection: ["DELETE /repos/{owner}/{repo}/tags/protection/{tag_protection_id}"],
+    deleteWebhook: ["DELETE /repos/{owner}/{repo}/hooks/{hook_id}"],
+    disableAutomatedSecurityFixes: ["DELETE /repos/{owner}/{repo}/automated-security-fixes"],
+    disableLfsForRepo: ["DELETE /repos/{owner}/{repo}/lfs"],
+    disableVulnerabilityAlerts: ["DELETE /repos/{owner}/{repo}/vulnerability-alerts"],
+    downloadArchive: ["GET /repos/{owner}/{repo}/zipball/{ref}", {}, {
+      renamed: ["repos", "downloadZipballArchive"]
+    }],
+    downloadTarballArchive: ["GET /repos/{owner}/{repo}/tarball/{ref}"],
+    downloadZipballArchive: ["GET /repos/{owner}/{repo}/zipball/{ref}"],
+    enableAutomatedSecurityFixes: ["PUT /repos/{owner}/{repo}/automated-security-fixes"],
+    enableLfsForRepo: ["PUT /repos/{owner}/{repo}/lfs"],
+    enableVulnerabilityAlerts: ["PUT /repos/{owner}/{repo}/vulnerability-alerts"],
+    generateReleaseNotes: ["POST /repos/{owner}/{repo}/releases/generate-notes"],
+    get: ["GET /repos/{owner}/{repo}"],
+    getAccessRestrictions: ["GET /repos/{owner}/{repo}/branches/{branch}/protection/restrictions"],
+    getAdminBranchProtection: ["GET /repos/{owner}/{repo}/branches/{branch}/protection/enforce_admins"],
+    getAllEnvironments: ["GET /repos/{owner}/{repo}/environments"],
+    getAllStatusCheckContexts: ["GET /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks/contexts"],
+    getAllTopics: ["GET /repos/{owner}/{repo}/topics"],
+    getAppsWithAccessToProtectedBranch: ["GET /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/apps"],
+    getAutolink: ["GET /repos/{owner}/{repo}/autolinks/{autolink_id}"],
+    getBranch: ["GET /repos/{owner}/{repo}/branches/{branch}"],
+    getBranchProtection: ["GET /repos/{owner}/{repo}/branches/{branch}/protection"],
+    getClones: ["GET /repos/{owner}/{repo}/traffic/clones"],
+    getCodeFrequencyStats: ["GET /repos/{owner}/{repo}/stats/code_frequency"],
+    getCollaboratorPermissionLevel: ["GET /repos/{owner}/{repo}/collaborators/{username}/permission"],
+    getCombinedStatusForRef: ["GET /repos/{owner}/{repo}/commits/{ref}/status"],
+    getCommit: ["GET /repos/{owner}/{repo}/commits/{ref}"],
+    getCommitActivityStats: ["GET /repos/{owner}/{repo}/stats/commit_activity"],
+    getCommitComment: ["GET /repos/{owner}/{repo}/comments/{comment_id}"],
+    getCommitSignatureProtection: ["GET /repos/{owner}/{repo}/branches/{branch}/protection/required_signatures"],
+    getCommunityProfileMetrics: ["GET /repos/{owner}/{repo}/community/profile"],
+    getContent: ["GET /repos/{owner}/{repo}/contents/{path}"],
+    getContributorsStats: ["GET /repos/{owner}/{repo}/stats/contributors"],
+    getDeployKey: ["GET /repos/{owner}/{repo}/keys/{key_id}"],
+    getDeployment: ["GET /repos/{owner}/{repo}/deployments/{deployment_id}"],
+    getDeploymentBranchPolicy: ["GET /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies/{branch_policy_id}"],
+    getDeploymentStatus: ["GET /repos/{owner}/{repo}/deployments/{deployment_id}/statuses/{status_id}"],
+    getEnvironment: ["GET /repos/{owner}/{repo}/environments/{environment_name}"],
+    getLatestPagesBuild: ["GET /repos/{owner}/{repo}/pages/builds/latest"],
+    getLatestRelease: ["GET /repos/{owner}/{repo}/releases/latest"],
+    getPages: ["GET /repos/{owner}/{repo}/pages"],
+    getPagesBuild: ["GET /repos/{owner}/{repo}/pages/builds/{build_id}"],
+    getPagesHealthCheck: ["GET /repos/{owner}/{repo}/pages/health"],
+    getParticipationStats: ["GET /repos/{owner}/{repo}/stats/participation"],
+    getPullRequestReviewProtection: ["GET /repos/{owner}/{repo}/branches/{branch}/protection/required_pull_request_reviews"],
+    getPunchCardStats: ["GET /repos/{owner}/{repo}/stats/punch_card"],
+    getReadme: ["GET /repos/{owner}/{repo}/readme"],
+    getReadmeInDirectory: ["GET /repos/{owner}/{repo}/readme/{dir}"],
+    getRelease: ["GET /repos/{owner}/{repo}/releases/{release_id}"],
+    getReleaseAsset: ["GET /repos/{owner}/{repo}/releases/assets/{asset_id}"],
+    getReleaseByTag: ["GET /repos/{owner}/{repo}/releases/tags/{tag}"],
+    getStatusChecksProtection: ["GET /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks"],
+    getTeamsWithAccessToProtectedBranch: ["GET /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/teams"],
+    getTopPaths: ["GET /repos/{owner}/{repo}/traffic/popular/paths"],
+    getTopReferrers: ["GET /repos/{owner}/{repo}/traffic/popular/referrers"],
+    getUsersWithAccessToProtectedBranch: ["GET /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/users"],
+    getViews: ["GET /repos/{owner}/{repo}/traffic/views"],
+    getWebhook: ["GET /repos/{owner}/{repo}/hooks/{hook_id}"],
+    getWebhookConfigForRepo: ["GET /repos/{owner}/{repo}/hooks/{hook_id}/config"],
+    getWebhookDelivery: ["GET /repos/{owner}/{repo}/hooks/{hook_id}/deliveries/{delivery_id}"],
+    listAutolinks: ["GET /repos/{owner}/{repo}/autolinks"],
+    listBranches: ["GET /repos/{owner}/{repo}/branches"],
+    listBranchesForHeadCommit: ["GET /repos/{owner}/{repo}/commits/{commit_sha}/branches-where-head"],
+    listCollaborators: ["GET /repos/{owner}/{repo}/collaborators"],
+    listCommentsForCommit: ["GET /repos/{owner}/{repo}/commits/{commit_sha}/comments"],
+    listCommitCommentsForRepo: ["GET /repos/{owner}/{repo}/comments"],
+    listCommitStatusesForRef: ["GET /repos/{owner}/{repo}/commits/{ref}/statuses"],
+    listCommits: ["GET /repos/{owner}/{repo}/commits"],
+    listContributors: ["GET /repos/{owner}/{repo}/contributors"],
+    listDeployKeys: ["GET /repos/{owner}/{repo}/keys"],
+    listDeploymentBranchPolicies: ["GET /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies"],
+    listDeploymentStatuses: ["GET /repos/{owner}/{repo}/deployments/{deployment_id}/statuses"],
+    listDeployments: ["GET /repos/{owner}/{repo}/deployments"],
+    listForAuthenticatedUser: ["GET /user/repos"],
+    listForOrg: ["GET /orgs/{org}/repos"],
+    listForUser: ["GET /users/{username}/repos"],
+    listForks: ["GET /repos/{owner}/{repo}/forks"],
+    listInvitations: ["GET /repos/{owner}/{repo}/invitations"],
+    listInvitationsForAuthenticatedUser: ["GET /user/repository_invitations"],
+    listLanguages: ["GET /repos/{owner}/{repo}/languages"],
+    listPagesBuilds: ["GET /repos/{owner}/{repo}/pages/builds"],
+    listPublic: ["GET /repositories"],
+    listPullRequestsAssociatedWithCommit: ["GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls"],
+    listReleaseAssets: ["GET /repos/{owner}/{repo}/releases/{release_id}/assets"],
+    listReleases: ["GET /repos/{owner}/{repo}/releases"],
+    listTagProtection: ["GET /repos/{owner}/{repo}/tags/protection"],
+    listTags: ["GET /repos/{owner}/{repo}/tags"],
+    listTeams: ["GET /repos/{owner}/{repo}/teams"],
+    listWebhookDeliveries: ["GET /repos/{owner}/{repo}/hooks/{hook_id}/deliveries"],
+    listWebhooks: ["GET /repos/{owner}/{repo}/hooks"],
+    merge: ["POST /repos/{owner}/{repo}/merges"],
+    mergeUpstream: ["POST /repos/{owner}/{repo}/merge-upstream"],
+    pingWebhook: ["POST /repos/{owner}/{repo}/hooks/{hook_id}/pings"],
+    redeliverWebhookDelivery: ["POST /repos/{owner}/{repo}/hooks/{hook_id}/deliveries/{delivery_id}/attempts"],
+    removeAppAccessRestrictions: ["DELETE /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/apps", {}, {
+      mapToData: "apps"
+    }],
+    removeCollaborator: ["DELETE /repos/{owner}/{repo}/collaborators/{username}"],
+    removeStatusCheckContexts: ["DELETE /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks/contexts", {}, {
+      mapToData: "contexts"
+    }],
+    removeStatusCheckProtection: ["DELETE /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks"],
+    removeTeamAccessRestrictions: ["DELETE /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/teams", {}, {
+      mapToData: "teams"
+    }],
+    removeUserAccessRestrictions: ["DELETE /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/users", {}, {
+      mapToData: "users"
+    }],
+    renameBranch: ["POST /repos/{owner}/{repo}/branches/{branch}/rename"],
+    replaceAllTopics: ["PUT /repos/{owner}/{repo}/topics"],
+    requestPagesBuild: ["POST /repos/{owner}/{repo}/pages/builds"],
+    setAdminBranchProtection: ["POST /repos/{owner}/{repo}/branches/{branch}/protection/enforce_admins"],
+    setAppAccessRestrictions: ["PUT /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/apps", {}, {
+      mapToData: "apps"
+    }],
+    setStatusCheckContexts: ["PUT /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks/contexts", {}, {
+      mapToData: "contexts"
+    }],
+    setTeamAccessRestrictions: ["PUT /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/teams", {}, {
+      mapToData: "teams"
+    }],
+    setUserAccessRestrictions: ["PUT /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/users", {}, {
+      mapToData: "users"
+    }],
+    testPushWebhook: ["POST /repos/{owner}/{repo}/hooks/{hook_id}/tests"],
+    transfer: ["POST /repos/{owner}/{repo}/transfer"],
+    update: ["PATCH /repos/{owner}/{repo}"],
+    updateBranchProtection: ["PUT /repos/{owner}/{repo}/branches/{branch}/protection"],
+    updateCommitComment: ["PATCH /repos/{owner}/{repo}/comments/{comment_id}"],
+    updateDeploymentBranchPolicy: ["PUT /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies/{branch_policy_id}"],
+    updateInformationAboutPagesSite: ["PUT /repos/{owner}/{repo}/pages"],
+    updateInvitation: ["PATCH /repos/{owner}/{repo}/invitations/{invitation_id}"],
+    updatePullRequestReviewProtection: ["PATCH /repos/{owner}/{repo}/branches/{branch}/protection/required_pull_request_reviews"],
+    updateRelease: ["PATCH /repos/{owner}/{repo}/releases/{release_id}"],
+    updateReleaseAsset: ["PATCH /repos/{owner}/{repo}/releases/assets/{asset_id}"],
+    updateStatusCheckPotection: ["PATCH /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks", {}, {
+      renamed: ["repos", "updateStatusCheckProtection"]
+    }],
+    updateStatusCheckProtection: ["PATCH /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks"],
+    updateWebhook: ["PATCH /repos/{owner}/{repo}/hooks/{hook_id}"],
+    updateWebhookConfigForRepo: ["PATCH /repos/{owner}/{repo}/hooks/{hook_id}/config"],
+    uploadReleaseAsset: ["POST /repos/{owner}/{repo}/releases/{release_id}/assets{?name,label}", {
+      baseUrl: "https://uploads.github.com"
+    }]
+  },
+  search: {
+    code: ["GET /search/code"],
+    commits: ["GET /search/commits"],
+    issuesAndPullRequests: ["GET /search/issues"],
+    labels: ["GET /search/labels"],
+    repos: ["GET /search/repositories"],
+    topics: ["GET /search/topics"],
+    users: ["GET /search/users"]
+  },
+  secretScanning: {
+    getAlert: ["GET /repos/{owner}/{repo}/secret-scanning/alerts/{alert_number}"],
+    listAlertsForEnterprise: ["GET /enterprises/{enterprise}/secret-scanning/alerts"],
+    listAlertsForOrg: ["GET /orgs/{org}/secret-scanning/alerts"],
+    listAlertsForRepo: ["GET /repos/{owner}/{repo}/secret-scanning/alerts"],
+    listLocationsForAlert: ["GET /repos/{owner}/{repo}/secret-scanning/alerts/{alert_number}/locations"],
+    updateAlert: ["PATCH /repos/{owner}/{repo}/secret-scanning/alerts/{alert_number}"]
+  },
+  teams: {
+    addOrUpdateMembershipForUserInOrg: ["PUT /orgs/{org}/teams/{team_slug}/memberships/{username}"],
+    addOrUpdateProjectPermissionsInOrg: ["PUT /orgs/{org}/teams/{team_slug}/projects/{project_id}"],
+    addOrUpdateRepoPermissionsInOrg: ["PUT /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}"],
+    checkPermissionsForProjectInOrg: ["GET /orgs/{org}/teams/{team_slug}/projects/{project_id}"],
+    checkPermissionsForRepoInOrg: ["GET /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}"],
+    create: ["POST /orgs/{org}/teams"],
+    createDiscussionCommentInOrg: ["POST /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/comments"],
+    createDiscussionInOrg: ["POST /orgs/{org}/teams/{team_slug}/discussions"],
+    deleteDiscussionCommentInOrg: ["DELETE /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/comments/{comment_number}"],
+    deleteDiscussionInOrg: ["DELETE /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}"],
+    deleteInOrg: ["DELETE /orgs/{org}/teams/{team_slug}"],
+    getByName: ["GET /orgs/{org}/teams/{team_slug}"],
+    getDiscussionCommentInOrg: ["GET /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/comments/{comment_number}"],
+    getDiscussionInOrg: ["GET /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}"],
+    getMembershipForUserInOrg: ["GET /orgs/{org}/teams/{team_slug}/memberships/{username}"],
+    list: ["GET /orgs/{org}/teams"],
+    listChildInOrg: ["GET /orgs/{org}/teams/{team_slug}/teams"],
+    listDiscussionCommentsInOrg: ["GET /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/comments"],
+    listDiscussionsInOrg: ["GET /orgs/{org}/teams/{team_slug}/discussions"],
+    listForAuthenticatedUser: ["GET /user/teams"],
+    listMembersInOrg: ["GET /orgs/{org}/teams/{team_slug}/members"],
+    listPendingInvitationsInOrg: ["GET /orgs/{org}/teams/{team_slug}/invitations"],
+    listProjectsInOrg: ["GET /orgs/{org}/teams/{team_slug}/projects"],
+    listReposInOrg: ["GET /orgs/{org}/teams/{team_slug}/repos"],
+    removeMembershipForUserInOrg: ["DELETE /orgs/{org}/teams/{team_slug}/memberships/{username}"],
+    removeProjectInOrg: ["DELETE /orgs/{org}/teams/{team_slug}/projects/{project_id}"],
+    removeRepoInOrg: ["DELETE /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}"],
+    updateDiscussionCommentInOrg: ["PATCH /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/comments/{comment_number}"],
+    updateDiscussionInOrg: ["PATCH /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}"],
+    updateInOrg: ["PATCH /orgs/{org}/teams/{team_slug}"]
+  },
+  users: {
+    addEmailForAuthenticated: ["POST /user/emails", {}, {
+      renamed: ["users", "addEmailForAuthenticatedUser"]
+    }],
+    addEmailForAuthenticatedUser: ["POST /user/emails"],
+    block: ["PUT /user/blocks/{username}"],
+    checkBlocked: ["GET /user/blocks/{username}"],
+    checkFollowingForUser: ["GET /users/{username}/following/{target_user}"],
+    checkPersonIsFollowedByAuthenticated: ["GET /user/following/{username}"],
+    createGpgKeyForAuthenticated: ["POST /user/gpg_keys", {}, {
+      renamed: ["users", "createGpgKeyForAuthenticatedUser"]
+    }],
+    createGpgKeyForAuthenticatedUser: ["POST /user/gpg_keys"],
+    createPublicSshKeyForAuthenticated: ["POST /user/keys", {}, {
+      renamed: ["users", "createPublicSshKeyForAuthenticatedUser"]
+    }],
+    createPublicSshKeyForAuthenticatedUser: ["POST /user/keys"],
+    createSshSigningKeyForAuthenticatedUser: ["POST /user/ssh_signing_keys"],
+    deleteEmailForAuthenticated: ["DELETE /user/emails", {}, {
+      renamed: ["users", "deleteEmailForAuthenticatedUser"]
+    }],
+    deleteEmailForAuthenticatedUser: ["DELETE /user/emails"],
+    deleteGpgKeyForAuthenticated: ["DELETE /user/gpg_keys/{gpg_key_id}", {}, {
+      renamed: ["users", "deleteGpgKeyForAuthenticatedUser"]
+    }],
+    deleteGpgKeyForAuthenticatedUser: ["DELETE /user/gpg_keys/{gpg_key_id}"],
+    deletePublicSshKeyForAuthenticated: ["DELETE /user/keys/{key_id}", {}, {
+      renamed: ["users", "deletePublicSshKeyForAuthenticatedUser"]
+    }],
+    deletePublicSshKeyForAuthenticatedUser: ["DELETE /user/keys/{key_id}"],
+    deleteSshSigningKeyForAuthenticatedUser: ["DELETE /user/ssh_signing_keys/{ssh_signing_key_id}"],
+    follow: ["PUT /user/following/{username}"],
+    getAuthenticated: ["GET /user"],
+    getByUsername: ["GET /users/{username}"],
+    getContextForUser: ["GET /users/{username}/hovercard"],
+    getGpgKeyForAuthenticated: ["GET /user/gpg_keys/{gpg_key_id}", {}, {
+      renamed: ["users", "getGpgKeyForAuthenticatedUser"]
+    }],
+    getGpgKeyForAuthenticatedUser: ["GET /user/gpg_keys/{gpg_key_id}"],
+    getPublicSshKeyForAuthenticated: ["GET /user/keys/{key_id}", {}, {
+      renamed: ["users", "getPublicSshKeyForAuthenticatedUser"]
+    }],
+    getPublicSshKeyForAuthenticatedUser: ["GET /user/keys/{key_id}"],
+    getSshSigningKeyForAuthenticatedUser: ["GET /user/ssh_signing_keys/{ssh_signing_key_id}"],
+    list: ["GET /users"],
+    listBlockedByAuthenticated: ["GET /user/blocks", {}, {
+      renamed: ["users", "listBlockedByAuthenticatedUser"]
+    }],
+    listBlockedByAuthenticatedUser: ["GET /user/blocks"],
+    listEmailsForAuthenticated: ["GET /user/emails", {}, {
+      renamed: ["users", "listEmailsForAuthenticatedUser"]
+    }],
+    listEmailsForAuthenticatedUser: ["GET /user/emails"],
+    listFollowedByAuthenticated: ["GET /user/following", {}, {
+      renamed: ["users", "listFollowedByAuthenticatedUser"]
+    }],
+    listFollowedByAuthenticatedUser: ["GET /user/following"],
+    listFollowersForAuthenticatedUser: ["GET /user/followers"],
+    listFollowersForUser: ["GET /users/{username}/followers"],
+    listFollowingForUser: ["GET /users/{username}/following"],
+    listGpgKeysForAuthenticated: ["GET /user/gpg_keys", {}, {
+      renamed: ["users", "listGpgKeysForAuthenticatedUser"]
+    }],
+    listGpgKeysForAuthenticatedUser: ["GET /user/gpg_keys"],
+    listGpgKeysForUser: ["GET /users/{username}/gpg_keys"],
+    listPublicEmailsForAuthenticated: ["GET /user/public_emails", {}, {
+      renamed: ["users", "listPublicEmailsForAuthenticatedUser"]
+    }],
+    listPublicEmailsForAuthenticatedUser: ["GET /user/public_emails"],
+    listPublicKeysForUser: ["GET /users/{username}/keys"],
+    listPublicSshKeysForAuthenticated: ["GET /user/keys", {}, {
+      renamed: ["users", "listPublicSshKeysForAuthenticatedUser"]
+    }],
+    listPublicSshKeysForAuthenticatedUser: ["GET /user/keys"],
+    listSshSigningKeysForAuthenticatedUser: ["GET /user/ssh_signing_keys"],
+    listSshSigningKeysForUser: ["GET /users/{username}/ssh_signing_keys"],
+    setPrimaryEmailVisibilityForAuthenticated: ["PATCH /user/email/visibility", {}, {
+      renamed: ["users", "setPrimaryEmailVisibilityForAuthenticatedUser"]
+    }],
+    setPrimaryEmailVisibilityForAuthenticatedUser: ["PATCH /user/email/visibility"],
+    unblock: ["DELETE /user/blocks/{username}"],
+    unfollow: ["DELETE /user/following/{username}"],
+    updateAuthenticated: ["PATCH /user"]
+  }
+};
+
+const VERSION = "6.8.1";
+
+function endpointsToMethods(octokit, endpointsMap) {
+  const newMethods = {};
+  for (const [scope, endpoints] of Object.entries(endpointsMap)) {
+    for (const [methodName, endpoint] of Object.entries(endpoints)) {
+      const [route, defaults, decorations] = endpoint;
+      const [method, url] = route.split(/ /);
+      const endpointDefaults = Object.assign({
+        method,
+        url
+      }, defaults);
+      if (!newMethods[scope]) {
+        newMethods[scope] = {};
+      }
+      const scopeMethods = newMethods[scope];
+      if (decorations) {
+        scopeMethods[methodName] = decorate(octokit, scope, methodName, endpointDefaults, decorations);
+        continue;
+      }
+      scopeMethods[methodName] = octokit.request.defaults(endpointDefaults);
+    }
+  }
+  return newMethods;
+}
+function decorate(octokit, scope, methodName, defaults, decorations) {
+  const requestWithDefaults = octokit.request.defaults(defaults);
+  /* istanbul ignore next */
+  function withDecorations(...args) {
+    // @ts-ignore https://github.com/microsoft/TypeScript/issues/25488
+    let options = requestWithDefaults.endpoint.merge(...args);
+    // There are currently no other decorations than `.mapToData`
+    if (decorations.mapToData) {
+      options = Object.assign({}, options, {
+        data: options[decorations.mapToData],
+        [decorations.mapToData]: undefined
+      });
+      return requestWithDefaults(options);
+    }
+    if (decorations.renamed) {
+      const [newScope, newMethodName] = decorations.renamed;
+      octokit.log.warn(`octokit.${scope}.${methodName}() has been renamed to octokit.${newScope}.${newMethodName}()`);
+    }
+    if (decorations.deprecated) {
+      octokit.log.warn(decorations.deprecated);
+    }
+    if (decorations.renamedParameters) {
+      // @ts-ignore https://github.com/microsoft/TypeScript/issues/25488
+      const options = requestWithDefaults.endpoint.merge(...args);
+      for (const [name, alias] of Object.entries(decorations.renamedParameters)) {
+        if (name in options) {
+          octokit.log.warn(`"${name}" parameter is deprecated for "octokit.${scope}.${methodName}()". Use "${alias}" instead`);
+          if (!(alias in options)) {
+            options[alias] = options[name];
+          }
+          delete options[name];
+        }
+      }
+      return requestWithDefaults(options);
+    }
+    // @ts-ignore https://github.com/microsoft/TypeScript/issues/25488
+    return requestWithDefaults(...args);
+  }
+  return Object.assign(withDecorations, requestWithDefaults);
+}
+
+function restEndpointMethods(octokit) {
+  const api = endpointsToMethods(octokit, Endpoints);
+  return {
+    rest: api
+  };
+}
+restEndpointMethods.VERSION = VERSION;
+function legacyRestEndpointMethods(octokit) {
+  const api = endpointsToMethods(octokit, Endpoints);
+  return {
+    ...api,
+    rest: api
+  };
+}
+legacyRestEndpointMethods.VERSION = VERSION;
+
+exports.legacyRestEndpointMethods = legacyRestEndpointMethods;
+exports.restEndpointMethods = restEndpointMethods;
+//# sourceMappingURL=index.js.map
+
+
+/***/ }),
+
+/***/ 4114:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+
+function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
+
+var deprecation = __nccwpck_require__(8932);
+var once = _interopDefault(__nccwpck_require__(1223));
+
+const logOnceCode = once(deprecation => console.warn(deprecation));
+const logOnceHeaders = once(deprecation => console.warn(deprecation));
+/**
+ * Error with extra properties to help with debugging
+ */
+class RequestError extends Error {
+  constructor(message, statusCode, options) {
+    super(message);
+    // Maintains proper stack trace (only available on V8)
+    /* istanbul ignore next */
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, this.constructor);
+    }
+    this.name = "HttpError";
+    this.status = statusCode;
+    let headers;
+    if ("headers" in options && typeof options.headers !== "undefined") {
+      headers = options.headers;
+    }
+    if ("response" in options) {
+      this.response = options.response;
+      headers = options.response.headers;
+    }
+    // redact request credentials without mutating original request options
+    const requestCopy = Object.assign({}, options.request);
+    if (options.request.headers.authorization) {
+      requestCopy.headers = Object.assign({}, options.request.headers, {
+        authorization: options.request.headers.authorization.replace(/ .*$/, " [REDACTED]")
+      });
+    }
+    requestCopy.url = requestCopy.url
+    // client_id & client_secret can be passed as URL query parameters to increase rate limit
+    // see https://developer.github.com/v3/#increasing-the-unauthenticated-rate-limit-for-oauth-applications
+    .replace(/\bclient_secret=\w+/g, "client_secret=[REDACTED]")
+    // OAuth tokens can be passed as URL query parameters, although it is not recommended
+    // see https://developer.github.com/v3/#oauth2-token-sent-in-a-header
+    .replace(/\baccess_token=\w+/g, "access_token=[REDACTED]");
+    this.request = requestCopy;
+    // deprecations
+    Object.defineProperty(this, "code", {
+      get() {
+        logOnceCode(new deprecation.Deprecation("[@octokit/request-error] `error.code` is deprecated, use `error.status`."));
+        return statusCode;
+      }
+    });
+    Object.defineProperty(this, "headers", {
+      get() {
+        logOnceHeaders(new deprecation.Deprecation("[@octokit/request-error] `error.headers` is deprecated, use `error.response.headers`."));
+        return headers || {};
+      }
+    });
+  }
+}
+
+exports.RequestError = RequestError;
+//# sourceMappingURL=index.js.map
+
+
+/***/ }),
+
+/***/ 7757:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// pkg/dist-src/index.js
+var dist_src_exports = {};
+__export(dist_src_exports, {
+  request: () => request
+});
+module.exports = __toCommonJS(dist_src_exports);
+var import_endpoint = __nccwpck_require__(7026);
+var import_universal_user_agent = __nccwpck_require__(5030);
+
+// pkg/dist-src/version.js
+var VERSION = "6.2.8";
+
+// pkg/dist-src/fetch-wrapper.js
+var import_is_plain_object = __nccwpck_require__(3287);
+var import_node_fetch = __toESM(__nccwpck_require__(5241));
+var import_request_error = __nccwpck_require__(4114);
+
+// pkg/dist-src/get-buffer-response.js
+function getBufferResponse(response) {
+  return response.arrayBuffer();
+}
+
+// pkg/dist-src/fetch-wrapper.js
+function fetchWrapper(requestOptions) {
+  const log = requestOptions.request && requestOptions.request.log ? requestOptions.request.log : console;
+  if ((0, import_is_plain_object.isPlainObject)(requestOptions.body) || Array.isArray(requestOptions.body)) {
+    requestOptions.body = JSON.stringify(requestOptions.body);
+  }
+  let headers = {};
+  let status;
+  let url;
+  const fetch = requestOptions.request && requestOptions.request.fetch || globalThis.fetch || /* istanbul ignore next */
+  import_node_fetch.default;
+  return fetch(
+    requestOptions.url,
+    Object.assign(
+      {
+        method: requestOptions.method,
+        body: requestOptions.body,
+        headers: requestOptions.headers,
+        redirect: requestOptions.redirect,
+        // duplex must be set if request.body is ReadableStream or Async Iterables.
+        // See https://fetch.spec.whatwg.org/#dom-requestinit-duplex.
+        ...requestOptions.body && { duplex: "half" }
+      },
+      // `requestOptions.request.agent` type is incompatible
+      // see https://github.com/octokit/types.ts/pull/264
+      requestOptions.request
+    )
+  ).then(async (response) => {
+    url = response.url;
+    status = response.status;
+    for (const keyAndValue of response.headers) {
+      headers[keyAndValue[0]] = keyAndValue[1];
+    }
+    if ("deprecation" in headers) {
+      const matches = headers.link && headers.link.match(/<([^>]+)>; rel="deprecation"/);
+      const deprecationLink = matches && matches.pop();
+      log.warn(
+        `[@octokit/request] "${requestOptions.method} ${requestOptions.url}" is deprecated. It is scheduled to be removed on ${headers.sunset}${deprecationLink ? `. See ${deprecationLink}` : ""}`
+      );
+    }
+    if (status === 204 || status === 205) {
+      return;
+    }
+    if (requestOptions.method === "HEAD") {
+      if (status < 400) {
+        return;
+      }
+      throw new import_request_error.RequestError(response.statusText, status, {
+        response: {
+          url,
+          status,
+          headers,
+          data: void 0
+        },
+        request: requestOptions
+      });
+    }
+    if (status === 304) {
+      throw new import_request_error.RequestError("Not modified", status, {
+        response: {
+          url,
+          status,
+          headers,
+          data: await getResponseData(response)
+        },
+        request: requestOptions
+      });
+    }
+    if (status >= 400) {
+      const data = await getResponseData(response);
+      const error = new import_request_error.RequestError(toErrorMessage(data), status, {
+        response: {
+          url,
+          status,
+          headers,
+          data
+        },
+        request: requestOptions
+      });
+      throw error;
+    }
+    return getResponseData(response);
+  }).then((data) => {
+    return {
+      status,
+      url,
+      headers,
+      data
+    };
+  }).catch((error) => {
+    if (error instanceof import_request_error.RequestError)
+      throw error;
+    else if (error.name === "AbortError")
+      throw error;
+    throw new import_request_error.RequestError(error.message, 500, {
+      request: requestOptions
+    });
+  });
+}
+async function getResponseData(response) {
+  const contentType = response.headers.get("content-type");
+  if (/application\/json/.test(contentType)) {
+    return response.json();
+  }
+  if (!contentType || /^text\/|charset=utf-8$/.test(contentType)) {
+    return response.text();
+  }
+  return getBufferResponse(response);
+}
+function toErrorMessage(data) {
+  if (typeof data === "string")
+    return data;
+  if ("message" in data) {
+    if (Array.isArray(data.errors)) {
+      return `${data.message}: ${data.errors.map(JSON.stringify).join(", ")}`;
+    }
+    return data.message;
+  }
+  return `Unknown error: ${JSON.stringify(data)}`;
+}
+
+// pkg/dist-src/with-defaults.js
+function withDefaults(oldEndpoint, newDefaults) {
+  const endpoint2 = oldEndpoint.defaults(newDefaults);
+  const newApi = function(route, parameters) {
+    const endpointOptions = endpoint2.merge(route, parameters);
+    if (!endpointOptions.request || !endpointOptions.request.hook) {
+      return fetchWrapper(endpoint2.parse(endpointOptions));
+    }
+    const request2 = (route2, parameters2) => {
+      return fetchWrapper(
+        endpoint2.parse(endpoint2.merge(route2, parameters2))
+      );
+    };
+    Object.assign(request2, {
+      endpoint: endpoint2,
+      defaults: withDefaults.bind(null, endpoint2)
+    });
+    return endpointOptions.request.hook(request2, endpointOptions);
+  };
+  return Object.assign(newApi, {
+    endpoint: endpoint2,
+    defaults: withDefaults.bind(null, endpoint2)
+  });
+}
+
+// pkg/dist-src/index.js
+var request = withDefaults(import_endpoint.endpoint, {
+  headers: {
+    "user-agent": `octokit-request.js/${VERSION} ${(0, import_universal_user_agent.getUserAgent)()}`
+  }
+});
+// Annotate the CommonJS export names for ESM import in node:
+0 && (0);
+
+
+/***/ }),
+
+/***/ 5241:
+/***/ ((module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+
+function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
+
+var Stream = _interopDefault(__nccwpck_require__(2781));
+var http = _interopDefault(__nccwpck_require__(3685));
+var Url = _interopDefault(__nccwpck_require__(7310));
+var whatwgUrl = _interopDefault(__nccwpck_require__(8665));
+var https = _interopDefault(__nccwpck_require__(5687));
+var zlib = _interopDefault(__nccwpck_require__(9796));
+
+// Based on https://github.com/tmpvar/jsdom/blob/aa85b2abf07766ff7bf5c1f6daafb3726f2f2db5/lib/jsdom/living/blob.js
+
+// fix for "Readable" isn't a named export issue
+const Readable = Stream.Readable;
+
+const BUFFER = Symbol('buffer');
+const TYPE = Symbol('type');
+
+class Blob {
+	constructor() {
+		this[TYPE] = '';
+
+		const blobParts = arguments[0];
+		const options = arguments[1];
+
+		const buffers = [];
+		let size = 0;
+
+		if (blobParts) {
+			const a = blobParts;
+			const length = Number(a.length);
+			for (let i = 0; i < length; i++) {
+				const element = a[i];
+				let buffer;
+				if (element instanceof Buffer) {
+					buffer = element;
+				} else if (ArrayBuffer.isView(element)) {
+					buffer = Buffer.from(element.buffer, element.byteOffset, element.byteLength);
+				} else if (element instanceof ArrayBuffer) {
+					buffer = Buffer.from(element);
+				} else if (element instanceof Blob) {
+					buffer = element[BUFFER];
+				} else {
+					buffer = Buffer.from(typeof element === 'string' ? element : String(element));
+				}
+				size += buffer.length;
+				buffers.push(buffer);
+			}
+		}
+
+		this[BUFFER] = Buffer.concat(buffers);
+
+		let type = options && options.type !== undefined && String(options.type).toLowerCase();
+		if (type && !/[^\u0020-\u007E]/.test(type)) {
+			this[TYPE] = type;
+		}
+	}
+	get size() {
+		return this[BUFFER].length;
+	}
+	get type() {
+		return this[TYPE];
+	}
+	text() {
+		return Promise.resolve(this[BUFFER].toString());
+	}
+	arrayBuffer() {
+		const buf = this[BUFFER];
+		const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+		return Promise.resolve(ab);
+	}
+	stream() {
+		const readable = new Readable();
+		readable._read = function () {};
+		readable.push(this[BUFFER]);
+		readable.push(null);
+		return readable;
+	}
+	toString() {
+		return '[object Blob]';
+	}
+	slice() {
+		const size = this.size;
+
+		const start = arguments[0];
+		const end = arguments[1];
+		let relativeStart, relativeEnd;
+		if (start === undefined) {
+			relativeStart = 0;
+		} else if (start < 0) {
+			relativeStart = Math.max(size + start, 0);
+		} else {
+			relativeStart = Math.min(start, size);
+		}
+		if (end === undefined) {
+			relativeEnd = size;
+		} else if (end < 0) {
+			relativeEnd = Math.max(size + end, 0);
+		} else {
+			relativeEnd = Math.min(end, size);
+		}
+		const span = Math.max(relativeEnd - relativeStart, 0);
+
+		const buffer = this[BUFFER];
+		const slicedBuffer = buffer.slice(relativeStart, relativeStart + span);
+		const blob = new Blob([], { type: arguments[2] });
+		blob[BUFFER] = slicedBuffer;
+		return blob;
+	}
+}
+
+Object.defineProperties(Blob.prototype, {
+	size: { enumerable: true },
+	type: { enumerable: true },
+	slice: { enumerable: true }
+});
+
+Object.defineProperty(Blob.prototype, Symbol.toStringTag, {
+	value: 'Blob',
+	writable: false,
+	enumerable: false,
+	configurable: true
+});
+
+/**
+ * fetch-error.js
+ *
+ * FetchError interface for operational errors
+ */
+
+/**
+ * Create FetchError instance
+ *
+ * @param   String      message      Error message for human
+ * @param   String      type         Error type for machine
+ * @param   String      systemError  For Node.js system error
+ * @return  FetchError
+ */
+function FetchError(message, type, systemError) {
+  Error.call(this, message);
+
+  this.message = message;
+  this.type = type;
+
+  // when err.type is `system`, err.code contains system error code
+  if (systemError) {
+    this.code = this.errno = systemError.code;
+  }
+
+  // hide custom error implementation details from end-users
+  Error.captureStackTrace(this, this.constructor);
+}
+
+FetchError.prototype = Object.create(Error.prototype);
+FetchError.prototype.constructor = FetchError;
+FetchError.prototype.name = 'FetchError';
+
+let convert;
+try {
+	convert = (__nccwpck_require__(2877).convert);
+} catch (e) {}
+
+const INTERNALS = Symbol('Body internals');
+
+// fix an issue where "PassThrough" isn't a named export for node <10
+const PassThrough = Stream.PassThrough;
+
+/**
+ * Body mixin
+ *
+ * Ref: https://fetch.spec.whatwg.org/#body
+ *
+ * @param   Stream  body  Readable stream
+ * @param   Object  opts  Response options
+ * @return  Void
+ */
+function Body(body) {
+	var _this = this;
+
+	var _ref = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
+	    _ref$size = _ref.size;
+
+	let size = _ref$size === undefined ? 0 : _ref$size;
+	var _ref$timeout = _ref.timeout;
+	let timeout = _ref$timeout === undefined ? 0 : _ref$timeout;
+
+	if (body == null) {
+		// body is undefined or null
+		body = null;
+	} else if (isURLSearchParams(body)) {
+		// body is a URLSearchParams
+		body = Buffer.from(body.toString());
+	} else if (isBlob(body)) ; else if (Buffer.isBuffer(body)) ; else if (Object.prototype.toString.call(body) === '[object ArrayBuffer]') {
+		// body is ArrayBuffer
+		body = Buffer.from(body);
+	} else if (ArrayBuffer.isView(body)) {
+		// body is ArrayBufferView
+		body = Buffer.from(body.buffer, body.byteOffset, body.byteLength);
+	} else if (body instanceof Stream) ; else {
+		// none of the above
+		// coerce to string then buffer
+		body = Buffer.from(String(body));
+	}
+	this[INTERNALS] = {
+		body,
+		disturbed: false,
+		error: null
+	};
+	this.size = size;
+	this.timeout = timeout;
+
+	if (body instanceof Stream) {
+		body.on('error', function (err) {
+			const error = err.name === 'AbortError' ? err : new FetchError(`Invalid response body while trying to fetch ${_this.url}: ${err.message}`, 'system', err);
+			_this[INTERNALS].error = error;
+		});
+	}
+}
+
+Body.prototype = {
+	get body() {
+		return this[INTERNALS].body;
+	},
+
+	get bodyUsed() {
+		return this[INTERNALS].disturbed;
+	},
+
+	/**
+  * Decode response as ArrayBuffer
+  *
+  * @return  Promise
+  */
+	arrayBuffer() {
+		return consumeBody.call(this).then(function (buf) {
+			return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+		});
+	},
+
+	/**
+  * Return raw response as Blob
+  *
+  * @return Promise
+  */
+	blob() {
+		let ct = this.headers && this.headers.get('content-type') || '';
+		return consumeBody.call(this).then(function (buf) {
+			return Object.assign(
+			// Prevent copying
+			new Blob([], {
+				type: ct.toLowerCase()
+			}), {
+				[BUFFER]: buf
+			});
+		});
+	},
+
+	/**
+  * Decode response as json
+  *
+  * @return  Promise
+  */
+	json() {
+		var _this2 = this;
+
+		return consumeBody.call(this).then(function (buffer) {
+			try {
+				return JSON.parse(buffer.toString());
+			} catch (err) {
+				return Body.Promise.reject(new FetchError(`invalid json response body at ${_this2.url} reason: ${err.message}`, 'invalid-json'));
+			}
+		});
+	},
+
+	/**
+  * Decode response as text
+  *
+  * @return  Promise
+  */
+	text() {
+		return consumeBody.call(this).then(function (buffer) {
+			return buffer.toString();
+		});
+	},
+
+	/**
+  * Decode response as buffer (non-spec api)
+  *
+  * @return  Promise
+  */
+	buffer() {
+		return consumeBody.call(this);
+	},
+
+	/**
+  * Decode response as text, while automatically detecting the encoding and
+  * trying to decode to UTF-8 (non-spec api)
+  *
+  * @return  Promise
+  */
+	textConverted() {
+		var _this3 = this;
+
+		return consumeBody.call(this).then(function (buffer) {
+			return convertBody(buffer, _this3.headers);
+		});
+	}
+};
+
+// In browsers, all properties are enumerable.
+Object.defineProperties(Body.prototype, {
+	body: { enumerable: true },
+	bodyUsed: { enumerable: true },
+	arrayBuffer: { enumerable: true },
+	blob: { enumerable: true },
+	json: { enumerable: true },
+	text: { enumerable: true }
+});
+
+Body.mixIn = function (proto) {
+	for (const name of Object.getOwnPropertyNames(Body.prototype)) {
+		// istanbul ignore else: future proof
+		if (!(name in proto)) {
+			const desc = Object.getOwnPropertyDescriptor(Body.prototype, name);
+			Object.defineProperty(proto, name, desc);
+		}
+	}
+};
+
+/**
+ * Consume and convert an entire Body to a Buffer.
+ *
+ * Ref: https://fetch.spec.whatwg.org/#concept-body-consume-body
+ *
+ * @return  Promise
+ */
+function consumeBody() {
+	var _this4 = this;
+
+	if (this[INTERNALS].disturbed) {
+		return Body.Promise.reject(new TypeError(`body used already for: ${this.url}`));
+	}
+
+	this[INTERNALS].disturbed = true;
+
+	if (this[INTERNALS].error) {
+		return Body.Promise.reject(this[INTERNALS].error);
+	}
+
+	let body = this.body;
+
+	// body is null
+	if (body === null) {
+		return Body.Promise.resolve(Buffer.alloc(0));
+	}
+
+	// body is blob
+	if (isBlob(body)) {
+		body = body.stream();
+	}
+
+	// body is buffer
+	if (Buffer.isBuffer(body)) {
+		return Body.Promise.resolve(body);
+	}
+
+	// istanbul ignore if: should never happen
+	if (!(body instanceof Stream)) {
+		return Body.Promise.resolve(Buffer.alloc(0));
+	}
+
+	// body is stream
+	// get ready to actually consume the body
+	let accum = [];
+	let accumBytes = 0;
+	let abort = false;
+
+	return new Body.Promise(function (resolve, reject) {
+		let resTimeout;
+
+		// allow timeout on slow response body
+		if (_this4.timeout) {
+			resTimeout = setTimeout(function () {
+				abort = true;
+				reject(new FetchError(`Response timeout while trying to fetch ${_this4.url} (over ${_this4.timeout}ms)`, 'body-timeout'));
+			}, _this4.timeout);
+		}
+
+		// handle stream errors
+		body.on('error', function (err) {
+			if (err.name === 'AbortError') {
+				// if the request was aborted, reject with this Error
+				abort = true;
+				reject(err);
+			} else {
+				// other errors, such as incorrect content-encoding
+				reject(new FetchError(`Invalid response body while trying to fetch ${_this4.url}: ${err.message}`, 'system', err));
+			}
+		});
+
+		body.on('data', function (chunk) {
+			if (abort || chunk === null) {
+				return;
+			}
+
+			if (_this4.size && accumBytes + chunk.length > _this4.size) {
+				abort = true;
+				reject(new FetchError(`content size at ${_this4.url} over limit: ${_this4.size}`, 'max-size'));
+				return;
+			}
+
+			accumBytes += chunk.length;
+			accum.push(chunk);
+		});
+
+		body.on('end', function () {
+			if (abort) {
+				return;
+			}
+
+			clearTimeout(resTimeout);
+
+			try {
+				resolve(Buffer.concat(accum, accumBytes));
+			} catch (err) {
+				// handle streams that have accumulated too much data (issue #414)
+				reject(new FetchError(`Could not create Buffer from response body for ${_this4.url}: ${err.message}`, 'system', err));
+			}
+		});
+	});
+}
+
+/**
+ * Detect buffer encoding and convert to target encoding
+ * ref: http://www.w3.org/TR/2011/WD-html5-20110113/parsing.html#determining-the-character-encoding
+ *
+ * @param   Buffer  buffer    Incoming buffer
+ * @param   String  encoding  Target encoding
+ * @return  String
+ */
+function convertBody(buffer, headers) {
+	if (typeof convert !== 'function') {
+		throw new Error('The package `encoding` must be installed to use the textConverted() function');
+	}
+
+	const ct = headers.get('content-type');
+	let charset = 'utf-8';
+	let res, str;
+
+	// header
+	if (ct) {
+		res = /charset=([^;]*)/i.exec(ct);
+	}
+
+	// no charset in content type, peek at response body for at most 1024 bytes
+	str = buffer.slice(0, 1024).toString();
+
+	// html5
+	if (!res && str) {
+		res = /<meta.+?charset=(['"])(.+?)\1/i.exec(str);
+	}
+
+	// html4
+	if (!res && str) {
+		res = /<meta[\s]+?http-equiv=(['"])content-type\1[\s]+?content=(['"])(.+?)\2/i.exec(str);
+		if (!res) {
+			res = /<meta[\s]+?content=(['"])(.+?)\1[\s]+?http-equiv=(['"])content-type\3/i.exec(str);
+			if (res) {
+				res.pop(); // drop last quote
+			}
+		}
+
+		if (res) {
+			res = /charset=(.*)/i.exec(res.pop());
+		}
+	}
+
+	// xml
+	if (!res && str) {
+		res = /<\?xml.+?encoding=(['"])(.+?)\1/i.exec(str);
+	}
+
+	// found charset
+	if (res) {
+		charset = res.pop();
+
+		// prevent decode issues when sites use incorrect encoding
+		// ref: https://hsivonen.fi/encoding-menu/
+		if (charset === 'gb2312' || charset === 'gbk') {
+			charset = 'gb18030';
+		}
+	}
+
+	// turn raw buffers into a single utf-8 buffer
+	return convert(buffer, 'UTF-8', charset).toString();
+}
+
+/**
+ * Detect a URLSearchParams object
+ * ref: https://github.com/bitinn/node-fetch/issues/296#issuecomment-307598143
+ *
+ * @param   Object  obj     Object to detect by type or brand
+ * @return  String
+ */
+function isURLSearchParams(obj) {
+	// Duck-typing as a necessary condition.
+	if (typeof obj !== 'object' || typeof obj.append !== 'function' || typeof obj.delete !== 'function' || typeof obj.get !== 'function' || typeof obj.getAll !== 'function' || typeof obj.has !== 'function' || typeof obj.set !== 'function') {
+		return false;
+	}
+
+	// Brand-checking and more duck-typing as optional condition.
+	return obj.constructor.name === 'URLSearchParams' || Object.prototype.toString.call(obj) === '[object URLSearchParams]' || typeof obj.sort === 'function';
+}
+
+/**
+ * Check if `obj` is a W3C `Blob` object (which `File` inherits from)
+ * @param  {*} obj
+ * @return {boolean}
+ */
+function isBlob(obj) {
+	return typeof obj === 'object' && typeof obj.arrayBuffer === 'function' && typeof obj.type === 'string' && typeof obj.stream === 'function' && typeof obj.constructor === 'function' && typeof obj.constructor.name === 'string' && /^(Blob|File)$/.test(obj.constructor.name) && /^(Blob|File)$/.test(obj[Symbol.toStringTag]);
+}
+
+/**
+ * Clone body given Res/Req instance
+ *
+ * @param   Mixed  instance  Response or Request instance
+ * @return  Mixed
+ */
+function clone(instance) {
+	let p1, p2;
+	let body = instance.body;
+
+	// don't allow cloning a used body
+	if (instance.bodyUsed) {
+		throw new Error('cannot clone body after it is used');
+	}
+
+	// check that body is a stream and not form-data object
+	// note: we can't clone the form-data object without having it as a dependency
+	if (body instanceof Stream && typeof body.getBoundary !== 'function') {
+		// tee instance body
+		p1 = new PassThrough();
+		p2 = new PassThrough();
+		body.pipe(p1);
+		body.pipe(p2);
+		// set instance body to teed body and return the other teed body
+		instance[INTERNALS].body = p1;
+		body = p2;
+	}
+
+	return body;
+}
+
+/**
+ * Performs the operation "extract a `Content-Type` value from |object|" as
+ * specified in the specification:
+ * https://fetch.spec.whatwg.org/#concept-bodyinit-extract
+ *
+ * This function assumes that instance.body is present.
+ *
+ * @param   Mixed  instance  Any options.body input
+ */
+function extractContentType(body) {
+	if (body === null) {
+		// body is null
+		return null;
+	} else if (typeof body === 'string') {
+		// body is string
+		return 'text/plain;charset=UTF-8';
+	} else if (isURLSearchParams(body)) {
+		// body is a URLSearchParams
+		return 'application/x-www-form-urlencoded;charset=UTF-8';
+	} else if (isBlob(body)) {
+		// body is blob
+		return body.type || null;
+	} else if (Buffer.isBuffer(body)) {
+		// body is buffer
+		return null;
+	} else if (Object.prototype.toString.call(body) === '[object ArrayBuffer]') {
+		// body is ArrayBuffer
+		return null;
+	} else if (ArrayBuffer.isView(body)) {
+		// body is ArrayBufferView
+		return null;
+	} else if (typeof body.getBoundary === 'function') {
+		// detect form data input from form-data module
+		return `multipart/form-data;boundary=${body.getBoundary()}`;
+	} else if (body instanceof Stream) {
+		// body is stream
+		// can't really do much about this
+		return null;
+	} else {
+		// Body constructor defaults other things to string
+		return 'text/plain;charset=UTF-8';
+	}
+}
+
+/**
+ * The Fetch Standard treats this as if "total bytes" is a property on the body.
+ * For us, we have to explicitly get it with a function.
+ *
+ * ref: https://fetch.spec.whatwg.org/#concept-body-total-bytes
+ *
+ * @param   Body    instance   Instance of Body
+ * @return  Number?            Number of bytes, or null if not possible
+ */
+function getTotalBytes(instance) {
+	const body = instance.body;
+
+
+	if (body === null) {
+		// body is null
+		return 0;
+	} else if (isBlob(body)) {
+		return body.size;
+	} else if (Buffer.isBuffer(body)) {
+		// body is buffer
+		return body.length;
+	} else if (body && typeof body.getLengthSync === 'function') {
+		// detect form data input from form-data module
+		if (body._lengthRetrievers && body._lengthRetrievers.length == 0 || // 1.x
+		body.hasKnownLength && body.hasKnownLength()) {
+			// 2.x
+			return body.getLengthSync();
+		}
+		return null;
+	} else {
+		// body is stream
+		return null;
+	}
+}
+
+/**
+ * Write a Body to a Node.js WritableStream (e.g. http.Request) object.
+ *
+ * @param   Body    instance   Instance of Body
+ * @return  Void
+ */
+function writeToStream(dest, instance) {
+	const body = instance.body;
+
+
+	if (body === null) {
+		// body is null
+		dest.end();
+	} else if (isBlob(body)) {
+		body.stream().pipe(dest);
+	} else if (Buffer.isBuffer(body)) {
+		// body is buffer
+		dest.write(body);
+		dest.end();
+	} else {
+		// body is stream
+		body.pipe(dest);
+	}
+}
+
+// expose Promise
+Body.Promise = global.Promise;
+
+/**
+ * headers.js
+ *
+ * Headers class offers convenient helpers
+ */
+
+const invalidTokenRegex = /[^\^_`a-zA-Z\-0-9!#$%&'*+.|~]/;
+const invalidHeaderCharRegex = /[^\t\x20-\x7e\x80-\xff]/;
+
+function validateName(name) {
+	name = `${name}`;
+	if (invalidTokenRegex.test(name) || name === '') {
+		throw new TypeError(`${name} is not a legal HTTP header name`);
+	}
+}
+
+function validateValue(value) {
+	value = `${value}`;
+	if (invalidHeaderCharRegex.test(value)) {
+		throw new TypeError(`${value} is not a legal HTTP header value`);
+	}
+}
+
+/**
+ * Find the key in the map object given a header name.
+ *
+ * Returns undefined if not found.
+ *
+ * @param   String  name  Header name
+ * @return  String|Undefined
+ */
+function find(map, name) {
+	name = name.toLowerCase();
+	for (const key in map) {
+		if (key.toLowerCase() === name) {
+			return key;
+		}
+	}
+	return undefined;
+}
+
+const MAP = Symbol('map');
+class Headers {
+	/**
+  * Headers class
+  *
+  * @param   Object  headers  Response headers
+  * @return  Void
+  */
+	constructor() {
+		let init = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : undefined;
+
+		this[MAP] = Object.create(null);
+
+		if (init instanceof Headers) {
+			const rawHeaders = init.raw();
+			const headerNames = Object.keys(rawHeaders);
+
+			for (const headerName of headerNames) {
+				for (const value of rawHeaders[headerName]) {
+					this.append(headerName, value);
+				}
+			}
+
+			return;
+		}
+
+		// We don't worry about converting prop to ByteString here as append()
+		// will handle it.
+		if (init == null) ; else if (typeof init === 'object') {
+			const method = init[Symbol.iterator];
+			if (method != null) {
+				if (typeof method !== 'function') {
+					throw new TypeError('Header pairs must be iterable');
+				}
+
+				// sequence<sequence<ByteString>>
+				// Note: per spec we have to first exhaust the lists then process them
+				const pairs = [];
+				for (const pair of init) {
+					if (typeof pair !== 'object' || typeof pair[Symbol.iterator] !== 'function') {
+						throw new TypeError('Each header pair must be iterable');
+					}
+					pairs.push(Array.from(pair));
+				}
+
+				for (const pair of pairs) {
+					if (pair.length !== 2) {
+						throw new TypeError('Each header pair must be a name/value tuple');
+					}
+					this.append(pair[0], pair[1]);
+				}
+			} else {
+				// record<ByteString, ByteString>
+				for (const key of Object.keys(init)) {
+					const value = init[key];
+					this.append(key, value);
+				}
+			}
+		} else {
+			throw new TypeError('Provided initializer must be an object');
+		}
+	}
+
+	/**
+  * Return combined header value given name
+  *
+  * @param   String  name  Header name
+  * @return  Mixed
+  */
+	get(name) {
+		name = `${name}`;
+		validateName(name);
+		const key = find(this[MAP], name);
+		if (key === undefined) {
+			return null;
+		}
+
+		return this[MAP][key].join(', ');
+	}
+
+	/**
+  * Iterate over all headers
+  *
+  * @param   Function  callback  Executed for each item with parameters (value, name, thisArg)
+  * @param   Boolean   thisArg   `this` context for callback function
+  * @return  Void
+  */
+	forEach(callback) {
+		let thisArg = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : undefined;
+
+		let pairs = getHeaders(this);
+		let i = 0;
+		while (i < pairs.length) {
+			var _pairs$i = pairs[i];
+			const name = _pairs$i[0],
+			      value = _pairs$i[1];
+
+			callback.call(thisArg, value, name, this);
+			pairs = getHeaders(this);
+			i++;
+		}
+	}
+
+	/**
+  * Overwrite header values given name
+  *
+  * @param   String  name   Header name
+  * @param   String  value  Header value
+  * @return  Void
+  */
+	set(name, value) {
+		name = `${name}`;
+		value = `${value}`;
+		validateName(name);
+		validateValue(value);
+		const key = find(this[MAP], name);
+		this[MAP][key !== undefined ? key : name] = [value];
+	}
+
+	/**
+  * Append a value onto existing header
+  *
+  * @param   String  name   Header name
+  * @param   String  value  Header value
+  * @return  Void
+  */
+	append(name, value) {
+		name = `${name}`;
+		value = `${value}`;
+		validateName(name);
+		validateValue(value);
+		const key = find(this[MAP], name);
+		if (key !== undefined) {
+			this[MAP][key].push(value);
+		} else {
+			this[MAP][name] = [value];
+		}
+	}
+
+	/**
+  * Check for header name existence
+  *
+  * @param   String   name  Header name
+  * @return  Boolean
+  */
+	has(name) {
+		name = `${name}`;
+		validateName(name);
+		return find(this[MAP], name) !== undefined;
+	}
+
+	/**
+  * Delete all header values given name
+  *
+  * @param   String  name  Header name
+  * @return  Void
+  */
+	delete(name) {
+		name = `${name}`;
+		validateName(name);
+		const key = find(this[MAP], name);
+		if (key !== undefined) {
+			delete this[MAP][key];
+		}
+	}
+
+	/**
+  * Return raw headers (non-spec api)
+  *
+  * @return  Object
+  */
+	raw() {
+		return this[MAP];
+	}
+
+	/**
+  * Get an iterator on keys.
+  *
+  * @return  Iterator
+  */
+	keys() {
+		return createHeadersIterator(this, 'key');
+	}
+
+	/**
+  * Get an iterator on values.
+  *
+  * @return  Iterator
+  */
+	values() {
+		return createHeadersIterator(this, 'value');
+	}
+
+	/**
+  * Get an iterator on entries.
+  *
+  * This is the default iterator of the Headers object.
+  *
+  * @return  Iterator
+  */
+	[Symbol.iterator]() {
+		return createHeadersIterator(this, 'key+value');
+	}
+}
+Headers.prototype.entries = Headers.prototype[Symbol.iterator];
+
+Object.defineProperty(Headers.prototype, Symbol.toStringTag, {
+	value: 'Headers',
+	writable: false,
+	enumerable: false,
+	configurable: true
+});
+
+Object.defineProperties(Headers.prototype, {
+	get: { enumerable: true },
+	forEach: { enumerable: true },
+	set: { enumerable: true },
+	append: { enumerable: true },
+	has: { enumerable: true },
+	delete: { enumerable: true },
+	keys: { enumerable: true },
+	values: { enumerable: true },
+	entries: { enumerable: true }
+});
+
+function getHeaders(headers) {
+	let kind = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 'key+value';
+
+	const keys = Object.keys(headers[MAP]).sort();
+	return keys.map(kind === 'key' ? function (k) {
+		return k.toLowerCase();
+	} : kind === 'value' ? function (k) {
+		return headers[MAP][k].join(', ');
+	} : function (k) {
+		return [k.toLowerCase(), headers[MAP][k].join(', ')];
+	});
+}
+
+const INTERNAL = Symbol('internal');
+
+function createHeadersIterator(target, kind) {
+	const iterator = Object.create(HeadersIteratorPrototype);
+	iterator[INTERNAL] = {
+		target,
+		kind,
+		index: 0
+	};
+	return iterator;
+}
+
+const HeadersIteratorPrototype = Object.setPrototypeOf({
+	next() {
+		// istanbul ignore if
+		if (!this || Object.getPrototypeOf(this) !== HeadersIteratorPrototype) {
+			throw new TypeError('Value of `this` is not a HeadersIterator');
+		}
+
+		var _INTERNAL = this[INTERNAL];
+		const target = _INTERNAL.target,
+		      kind = _INTERNAL.kind,
+		      index = _INTERNAL.index;
+
+		const values = getHeaders(target, kind);
+		const len = values.length;
+		if (index >= len) {
+			return {
+				value: undefined,
+				done: true
+			};
+		}
+
+		this[INTERNAL].index = index + 1;
+
+		return {
+			value: values[index],
+			done: false
+		};
+	}
+}, Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())));
+
+Object.defineProperty(HeadersIteratorPrototype, Symbol.toStringTag, {
+	value: 'HeadersIterator',
+	writable: false,
+	enumerable: false,
+	configurable: true
+});
+
+/**
+ * Export the Headers object in a form that Node.js can consume.
+ *
+ * @param   Headers  headers
+ * @return  Object
+ */
+function exportNodeCompatibleHeaders(headers) {
+	const obj = Object.assign({ __proto__: null }, headers[MAP]);
+
+	// http.request() only supports string as Host header. This hack makes
+	// specifying custom Host header possible.
+	const hostHeaderKey = find(headers[MAP], 'Host');
+	if (hostHeaderKey !== undefined) {
+		obj[hostHeaderKey] = obj[hostHeaderKey][0];
+	}
+
+	return obj;
+}
+
+/**
+ * Create a Headers object from an object of headers, ignoring those that do
+ * not conform to HTTP grammar productions.
+ *
+ * @param   Object  obj  Object of headers
+ * @return  Headers
+ */
+function createHeadersLenient(obj) {
+	const headers = new Headers();
+	for (const name of Object.keys(obj)) {
+		if (invalidTokenRegex.test(name)) {
+			continue;
+		}
+		if (Array.isArray(obj[name])) {
+			for (const val of obj[name]) {
+				if (invalidHeaderCharRegex.test(val)) {
+					continue;
+				}
+				if (headers[MAP][name] === undefined) {
+					headers[MAP][name] = [val];
+				} else {
+					headers[MAP][name].push(val);
+				}
+			}
+		} else if (!invalidHeaderCharRegex.test(obj[name])) {
+			headers[MAP][name] = [obj[name]];
+		}
+	}
+	return headers;
+}
+
+const INTERNALS$1 = Symbol('Response internals');
+
+// fix an issue where "STATUS_CODES" aren't a named export for node <10
+const STATUS_CODES = http.STATUS_CODES;
+
+/**
+ * Response class
+ *
+ * @param   Stream  body  Readable stream
+ * @param   Object  opts  Response options
+ * @return  Void
+ */
+class Response {
+	constructor() {
+		let body = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : null;
+		let opts = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+
+		Body.call(this, body, opts);
+
+		const status = opts.status || 200;
+		const headers = new Headers(opts.headers);
+
+		if (body != null && !headers.has('Content-Type')) {
+			const contentType = extractContentType(body);
+			if (contentType) {
+				headers.append('Content-Type', contentType);
+			}
+		}
+
+		this[INTERNALS$1] = {
+			url: opts.url,
+			status,
+			statusText: opts.statusText || STATUS_CODES[status],
+			headers,
+			counter: opts.counter
+		};
+	}
+
+	get url() {
+		return this[INTERNALS$1].url || '';
+	}
+
+	get status() {
+		return this[INTERNALS$1].status;
+	}
+
+	/**
+  * Convenience property representing if the request ended normally
+  */
+	get ok() {
+		return this[INTERNALS$1].status >= 200 && this[INTERNALS$1].status < 300;
+	}
+
+	get redirected() {
+		return this[INTERNALS$1].counter > 0;
+	}
+
+	get statusText() {
+		return this[INTERNALS$1].statusText;
+	}
+
+	get headers() {
+		return this[INTERNALS$1].headers;
+	}
+
+	/**
+  * Clone this response
+  *
+  * @return  Response
+  */
+	clone() {
+		return new Response(clone(this), {
+			url: this.url,
+			status: this.status,
+			statusText: this.statusText,
+			headers: this.headers,
+			ok: this.ok,
+			redirected: this.redirected
+		});
+	}
+}
+
+Body.mixIn(Response.prototype);
+
+Object.defineProperties(Response.prototype, {
+	url: { enumerable: true },
+	status: { enumerable: true },
+	ok: { enumerable: true },
+	redirected: { enumerable: true },
+	statusText: { enumerable: true },
+	headers: { enumerable: true },
+	clone: { enumerable: true }
+});
+
+Object.defineProperty(Response.prototype, Symbol.toStringTag, {
+	value: 'Response',
+	writable: false,
+	enumerable: false,
+	configurable: true
+});
+
+const INTERNALS$2 = Symbol('Request internals');
+const URL = Url.URL || whatwgUrl.URL;
+
+// fix an issue where "format", "parse" aren't a named export for node <10
+const parse_url = Url.parse;
+const format_url = Url.format;
+
+/**
+ * Wrapper around `new URL` to handle arbitrary URLs
+ *
+ * @param  {string} urlStr
+ * @return {void}
+ */
+function parseURL(urlStr) {
+	/*
+ 	Check whether the URL is absolute or not
+ 		Scheme: https://tools.ietf.org/html/rfc3986#section-3.1
+ 	Absolute URL: https://tools.ietf.org/html/rfc3986#section-4.3
+ */
+	if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.exec(urlStr)) {
+		urlStr = new URL(urlStr).toString();
+	}
+
+	// Fallback to old implementation for arbitrary URLs
+	return parse_url(urlStr);
+}
+
+const streamDestructionSupported = 'destroy' in Stream.Readable.prototype;
+
+/**
+ * Check if a value is an instance of Request.
+ *
+ * @param   Mixed   input
+ * @return  Boolean
+ */
+function isRequest(input) {
+	return typeof input === 'object' && typeof input[INTERNALS$2] === 'object';
+}
+
+function isAbortSignal(signal) {
+	const proto = signal && typeof signal === 'object' && Object.getPrototypeOf(signal);
+	return !!(proto && proto.constructor.name === 'AbortSignal');
+}
+
+/**
+ * Request class
+ *
+ * @param   Mixed   input  Url or Request instance
+ * @param   Object  init   Custom options
+ * @return  Void
+ */
+class Request {
+	constructor(input) {
+		let init = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+
+		let parsedURL;
+
+		// normalize input
+		if (!isRequest(input)) {
+			if (input && input.href) {
+				// in order to support Node.js' Url objects; though WHATWG's URL objects
+				// will fall into this branch also (since their `toString()` will return
+				// `href` property anyway)
+				parsedURL = parseURL(input.href);
+			} else {
+				// coerce input to a string before attempting to parse
+				parsedURL = parseURL(`${input}`);
+			}
+			input = {};
+		} else {
+			parsedURL = parseURL(input.url);
+		}
+
+		let method = init.method || input.method || 'GET';
+		method = method.toUpperCase();
+
+		if ((init.body != null || isRequest(input) && input.body !== null) && (method === 'GET' || method === 'HEAD')) {
+			throw new TypeError('Request with GET/HEAD method cannot have body');
+		}
+
+		let inputBody = init.body != null ? init.body : isRequest(input) && input.body !== null ? clone(input) : null;
+
+		Body.call(this, inputBody, {
+			timeout: init.timeout || input.timeout || 0,
+			size: init.size || input.size || 0
+		});
+
+		const headers = new Headers(init.headers || input.headers || {});
+
+		if (inputBody != null && !headers.has('Content-Type')) {
+			const contentType = extractContentType(inputBody);
+			if (contentType) {
+				headers.append('Content-Type', contentType);
+			}
+		}
+
+		let signal = isRequest(input) ? input.signal : null;
+		if ('signal' in init) signal = init.signal;
+
+		if (signal != null && !isAbortSignal(signal)) {
+			throw new TypeError('Expected signal to be an instanceof AbortSignal');
+		}
+
+		this[INTERNALS$2] = {
+			method,
+			redirect: init.redirect || input.redirect || 'follow',
+			headers,
+			parsedURL,
+			signal
+		};
+
+		// node-fetch-only options
+		this.follow = init.follow !== undefined ? init.follow : input.follow !== undefined ? input.follow : 20;
+		this.compress = init.compress !== undefined ? init.compress : input.compress !== undefined ? input.compress : true;
+		this.counter = init.counter || input.counter || 0;
+		this.agent = init.agent || input.agent;
+	}
+
+	get method() {
+		return this[INTERNALS$2].method;
+	}
+
+	get url() {
+		return format_url(this[INTERNALS$2].parsedURL);
+	}
+
+	get headers() {
+		return this[INTERNALS$2].headers;
+	}
+
+	get redirect() {
+		return this[INTERNALS$2].redirect;
+	}
+
+	get signal() {
+		return this[INTERNALS$2].signal;
+	}
+
+	/**
+  * Clone this request
+  *
+  * @return  Request
+  */
+	clone() {
+		return new Request(this);
+	}
+}
+
+Body.mixIn(Request.prototype);
+
+Object.defineProperty(Request.prototype, Symbol.toStringTag, {
+	value: 'Request',
+	writable: false,
+	enumerable: false,
+	configurable: true
+});
+
+Object.defineProperties(Request.prototype, {
+	method: { enumerable: true },
+	url: { enumerable: true },
+	headers: { enumerable: true },
+	redirect: { enumerable: true },
+	clone: { enumerable: true },
+	signal: { enumerable: true }
+});
+
+/**
+ * Convert a Request to Node.js http request options.
+ *
+ * @param   Request  A Request instance
+ * @return  Object   The options object to be passed to http.request
+ */
+function getNodeRequestOptions(request) {
+	const parsedURL = request[INTERNALS$2].parsedURL;
+	const headers = new Headers(request[INTERNALS$2].headers);
+
+	// fetch step 1.3
+	if (!headers.has('Accept')) {
+		headers.set('Accept', '*/*');
+	}
+
+	// Basic fetch
+	if (!parsedURL.protocol || !parsedURL.hostname) {
+		throw new TypeError('Only absolute URLs are supported');
+	}
+
+	if (!/^https?:$/.test(parsedURL.protocol)) {
+		throw new TypeError('Only HTTP(S) protocols are supported');
+	}
+
+	if (request.signal && request.body instanceof Stream.Readable && !streamDestructionSupported) {
+		throw new Error('Cancellation of streamed requests with AbortSignal is not supported in node < 8');
+	}
+
+	// HTTP-network-or-cache fetch steps 2.4-2.7
+	let contentLengthValue = null;
+	if (request.body == null && /^(POST|PUT)$/i.test(request.method)) {
+		contentLengthValue = '0';
+	}
+	if (request.body != null) {
+		const totalBytes = getTotalBytes(request);
+		if (typeof totalBytes === 'number') {
+			contentLengthValue = String(totalBytes);
+		}
+	}
+	if (contentLengthValue) {
+		headers.set('Content-Length', contentLengthValue);
+	}
+
+	// HTTP-network-or-cache fetch step 2.11
+	if (!headers.has('User-Agent')) {
+		headers.set('User-Agent', 'node-fetch/1.0 (+https://github.com/bitinn/node-fetch)');
+	}
+
+	// HTTP-network-or-cache fetch step 2.15
+	if (request.compress && !headers.has('Accept-Encoding')) {
+		headers.set('Accept-Encoding', 'gzip,deflate');
+	}
+
+	let agent = request.agent;
+	if (typeof agent === 'function') {
+		agent = agent(parsedURL);
+	}
+
+	// HTTP-network fetch step 4.2
+	// chunked encoding is handled by Node.js
+
+	return Object.assign({}, parsedURL, {
+		method: request.method,
+		headers: exportNodeCompatibleHeaders(headers),
+		agent
+	});
+}
+
+/**
+ * abort-error.js
+ *
+ * AbortError interface for cancelled requests
+ */
+
+/**
+ * Create AbortError instance
+ *
+ * @param   String      message      Error message for human
+ * @return  AbortError
+ */
+function AbortError(message) {
+  Error.call(this, message);
+
+  this.type = 'aborted';
+  this.message = message;
+
+  // hide custom error implementation details from end-users
+  Error.captureStackTrace(this, this.constructor);
+}
+
+AbortError.prototype = Object.create(Error.prototype);
+AbortError.prototype.constructor = AbortError;
+AbortError.prototype.name = 'AbortError';
+
+const URL$1 = Url.URL || whatwgUrl.URL;
+
+// fix an issue where "PassThrough", "resolve" aren't a named export for node <10
+const PassThrough$1 = Stream.PassThrough;
+
+const isDomainOrSubdomain = function isDomainOrSubdomain(destination, original) {
+	const orig = new URL$1(original).hostname;
+	const dest = new URL$1(destination).hostname;
+
+	return orig === dest || orig[orig.length - dest.length - 1] === '.' && orig.endsWith(dest);
+};
+
+/**
+ * isSameProtocol reports whether the two provided URLs use the same protocol.
+ *
+ * Both domains must already be in canonical form.
+ * @param {string|URL} original
+ * @param {string|URL} destination
+ */
+const isSameProtocol = function isSameProtocol(destination, original) {
+	const orig = new URL$1(original).protocol;
+	const dest = new URL$1(destination).protocol;
+
+	return orig === dest;
+};
+
+/**
+ * Fetch function
+ *
+ * @param   Mixed    url   Absolute url or Request instance
+ * @param   Object   opts  Fetch options
+ * @return  Promise
+ */
+function fetch(url, opts) {
+
+	// allow custom promise
+	if (!fetch.Promise) {
+		throw new Error('native promise missing, set fetch.Promise to your favorite alternative');
+	}
+
+	Body.Promise = fetch.Promise;
+
+	// wrap http.request into fetch
+	return new fetch.Promise(function (resolve, reject) {
+		// build request object
+		const request = new Request(url, opts);
+		const options = getNodeRequestOptions(request);
+
+		const send = (options.protocol === 'https:' ? https : http).request;
+		const signal = request.signal;
+
+		let response = null;
+
+		const abort = function abort() {
+			let error = new AbortError('The user aborted a request.');
+			reject(error);
+			if (request.body && request.body instanceof Stream.Readable) {
+				destroyStream(request.body, error);
+			}
+			if (!response || !response.body) return;
+			response.body.emit('error', error);
+		};
+
+		if (signal && signal.aborted) {
+			abort();
+			return;
+		}
+
+		const abortAndFinalize = function abortAndFinalize() {
+			abort();
+			finalize();
+		};
+
+		// send request
+		const req = send(options);
+		let reqTimeout;
+
+		if (signal) {
+			signal.addEventListener('abort', abortAndFinalize);
+		}
+
+		function finalize() {
+			req.abort();
+			if (signal) signal.removeEventListener('abort', abortAndFinalize);
+			clearTimeout(reqTimeout);
+		}
+
+		if (request.timeout) {
+			req.once('socket', function (socket) {
+				reqTimeout = setTimeout(function () {
+					reject(new FetchError(`network timeout at: ${request.url}`, 'request-timeout'));
+					finalize();
+				}, request.timeout);
+			});
+		}
+
+		req.on('error', function (err) {
+			reject(new FetchError(`request to ${request.url} failed, reason: ${err.message}`, 'system', err));
+
+			if (response && response.body) {
+				destroyStream(response.body, err);
+			}
+
+			finalize();
+		});
+
+		fixResponseChunkedTransferBadEnding(req, function (err) {
+			if (signal && signal.aborted) {
+				return;
+			}
+
+			if (response && response.body) {
+				destroyStream(response.body, err);
+			}
+		});
+
+		/* c8 ignore next 18 */
+		if (parseInt(process.version.substring(1)) < 14) {
+			// Before Node.js 14, pipeline() does not fully support async iterators and does not always
+			// properly handle when the socket close/end events are out of order.
+			req.on('socket', function (s) {
+				s.addListener('close', function (hadError) {
+					// if a data listener is still present we didn't end cleanly
+					const hasDataListener = s.listenerCount('data') > 0;
+
+					// if end happened before close but the socket didn't emit an error, do it now
+					if (response && hasDataListener && !hadError && !(signal && signal.aborted)) {
+						const err = new Error('Premature close');
+						err.code = 'ERR_STREAM_PREMATURE_CLOSE';
+						response.body.emit('error', err);
+					}
+				});
+			});
+		}
+
+		req.on('response', function (res) {
+			clearTimeout(reqTimeout);
+
+			const headers = createHeadersLenient(res.headers);
+
+			// HTTP fetch step 5
+			if (fetch.isRedirect(res.statusCode)) {
+				// HTTP fetch step 5.2
+				const location = headers.get('Location');
+
+				// HTTP fetch step 5.3
+				let locationURL = null;
+				try {
+					locationURL = location === null ? null : new URL$1(location, request.url).toString();
+				} catch (err) {
+					// error here can only be invalid URL in Location: header
+					// do not throw when options.redirect == manual
+					// let the user extract the errorneous redirect URL
+					if (request.redirect !== 'manual') {
+						reject(new FetchError(`uri requested responds with an invalid redirect URL: ${location}`, 'invalid-redirect'));
+						finalize();
+						return;
+					}
+				}
+
+				// HTTP fetch step 5.5
+				switch (request.redirect) {
+					case 'error':
+						reject(new FetchError(`uri requested responds with a redirect, redirect mode is set to error: ${request.url}`, 'no-redirect'));
+						finalize();
+						return;
+					case 'manual':
+						// node-fetch-specific step: make manual redirect a bit easier to use by setting the Location header value to the resolved URL.
+						if (locationURL !== null) {
+							// handle corrupted header
+							try {
+								headers.set('Location', locationURL);
+							} catch (err) {
+								// istanbul ignore next: nodejs server prevent invalid response headers, we can't test this through normal request
+								reject(err);
+							}
+						}
+						break;
+					case 'follow':
+						// HTTP-redirect fetch step 2
+						if (locationURL === null) {
+							break;
+						}
+
+						// HTTP-redirect fetch step 5
+						if (request.counter >= request.follow) {
+							reject(new FetchError(`maximum redirect reached at: ${request.url}`, 'max-redirect'));
+							finalize();
+							return;
+						}
+
+						// HTTP-redirect fetch step 6 (counter increment)
+						// Create a new Request object.
+						const requestOpts = {
+							headers: new Headers(request.headers),
+							follow: request.follow,
+							counter: request.counter + 1,
+							agent: request.agent,
+							compress: request.compress,
+							method: request.method,
+							body: request.body,
+							signal: request.signal,
+							timeout: request.timeout,
+							size: request.size
+						};
+
+						if (!isDomainOrSubdomain(request.url, locationURL) || !isSameProtocol(request.url, locationURL)) {
+							for (const name of ['authorization', 'www-authenticate', 'cookie', 'cookie2']) {
+								requestOpts.headers.delete(name);
+							}
+						}
+
+						// HTTP-redirect fetch step 9
+						if (res.statusCode !== 303 && request.body && getTotalBytes(request) === null) {
+							reject(new FetchError('Cannot follow redirect with body being a readable stream', 'unsupported-redirect'));
+							finalize();
+							return;
+						}
+
+						// HTTP-redirect fetch step 11
+						if (res.statusCode === 303 || (res.statusCode === 301 || res.statusCode === 302) && request.method === 'POST') {
+							requestOpts.method = 'GET';
+							requestOpts.body = undefined;
+							requestOpts.headers.delete('content-length');
+						}
+
+						// HTTP-redirect fetch step 15
+						resolve(fetch(new Request(locationURL, requestOpts)));
+						finalize();
+						return;
+				}
+			}
+
+			// prepare response
+			res.once('end', function () {
+				if (signal) signal.removeEventListener('abort', abortAndFinalize);
+			});
+			let body = res.pipe(new PassThrough$1());
+
+			const response_options = {
+				url: request.url,
+				status: res.statusCode,
+				statusText: res.statusMessage,
+				headers: headers,
+				size: request.size,
+				timeout: request.timeout,
+				counter: request.counter
+			};
+
+			// HTTP-network fetch step 12.1.1.3
+			const codings = headers.get('Content-Encoding');
+
+			// HTTP-network fetch step 12.1.1.4: handle content codings
+
+			// in following scenarios we ignore compression support
+			// 1. compression support is disabled
+			// 2. HEAD request
+			// 3. no Content-Encoding header
+			// 4. no content response (204)
+			// 5. content not modified response (304)
+			if (!request.compress || request.method === 'HEAD' || codings === null || res.statusCode === 204 || res.statusCode === 304) {
+				response = new Response(body, response_options);
+				resolve(response);
+				return;
+			}
+
+			// For Node v6+
+			// Be less strict when decoding compressed responses, since sometimes
+			// servers send slightly invalid responses that are still accepted
+			// by common browsers.
+			// Always using Z_SYNC_FLUSH is what cURL does.
+			const zlibOptions = {
+				flush: zlib.Z_SYNC_FLUSH,
+				finishFlush: zlib.Z_SYNC_FLUSH
+			};
+
+			// for gzip
+			if (codings == 'gzip' || codings == 'x-gzip') {
+				body = body.pipe(zlib.createGunzip(zlibOptions));
+				response = new Response(body, response_options);
+				resolve(response);
+				return;
+			}
+
+			// for deflate
+			if (codings == 'deflate' || codings == 'x-deflate') {
+				// handle the infamous raw deflate response from old servers
+				// a hack for old IIS and Apache servers
+				const raw = res.pipe(new PassThrough$1());
+				raw.once('data', function (chunk) {
+					// see http://stackoverflow.com/questions/37519828
+					if ((chunk[0] & 0x0F) === 0x08) {
+						body = body.pipe(zlib.createInflate());
+					} else {
+						body = body.pipe(zlib.createInflateRaw());
+					}
+					response = new Response(body, response_options);
+					resolve(response);
+				});
+				raw.on('end', function () {
+					// some old IIS servers return zero-length OK deflate responses, so 'data' is never emitted.
+					if (!response) {
+						response = new Response(body, response_options);
+						resolve(response);
+					}
+				});
+				return;
+			}
+
+			// for br
+			if (codings == 'br' && typeof zlib.createBrotliDecompress === 'function') {
+				body = body.pipe(zlib.createBrotliDecompress());
+				response = new Response(body, response_options);
+				resolve(response);
+				return;
+			}
+
+			// otherwise, use response as-is
+			response = new Response(body, response_options);
+			resolve(response);
+		});
+
+		writeToStream(req, request);
+	});
+}
+function fixResponseChunkedTransferBadEnding(request, errorCallback) {
+	let socket;
+
+	request.on('socket', function (s) {
+		socket = s;
+	});
+
+	request.on('response', function (response) {
+		const headers = response.headers;
+
+		if (headers['transfer-encoding'] === 'chunked' && !headers['content-length']) {
+			response.once('close', function (hadError) {
+				// tests for socket presence, as in some situations the
+				// the 'socket' event is not triggered for the request
+				// (happens in deno), avoids `TypeError`
+				// if a data listener is still present we didn't end cleanly
+				const hasDataListener = socket && socket.listenerCount('data') > 0;
+
+				if (hasDataListener && !hadError) {
+					const err = new Error('Premature close');
+					err.code = 'ERR_STREAM_PREMATURE_CLOSE';
+					errorCallback(err);
+				}
+			});
+		}
+	});
+}
+
+function destroyStream(stream, err) {
+	if (stream.destroy) {
+		stream.destroy(err);
+	} else {
+		// node < 8
+		stream.emit('error', err);
+		stream.end();
+	}
+}
+
+/**
+ * Redirect code matching
+ *
+ * @param   Number   code  Status code
+ * @return  Boolean
+ */
+fetch.isRedirect = function (code) {
+	return code === 301 || code === 302 || code === 303 || code === 307 || code === 308;
+};
+
+// expose Promise
+fetch.Promise = global.Promise;
+
+module.exports = exports = fetch;
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports["default"] = exports;
+exports.Headers = Headers;
+exports.Request = Request;
+exports.Response = Response;
+exports.FetchError = FetchError;
+exports.AbortError = AbortError;
+
+
+/***/ }),
+
+/***/ 2473:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+Object.defineProperty(exports, "NIL", ({
+  enumerable: true,
+  get: function () {
+    return _nil.default;
+  }
+}));
+Object.defineProperty(exports, "parse", ({
+  enumerable: true,
+  get: function () {
+    return _parse.default;
+  }
+}));
+Object.defineProperty(exports, "stringify", ({
+  enumerable: true,
+  get: function () {
+    return _stringify.default;
+  }
+}));
+Object.defineProperty(exports, "v1", ({
+  enumerable: true,
+  get: function () {
+    return _v.default;
+  }
+}));
+Object.defineProperty(exports, "v3", ({
+  enumerable: true,
+  get: function () {
+    return _v2.default;
+  }
+}));
+Object.defineProperty(exports, "v4", ({
+  enumerable: true,
+  get: function () {
+    return _v3.default;
+  }
+}));
+Object.defineProperty(exports, "v5", ({
+  enumerable: true,
+  get: function () {
+    return _v4.default;
+  }
+}));
+Object.defineProperty(exports, "validate", ({
+  enumerable: true,
+  get: function () {
+    return _validate.default;
+  }
+}));
+Object.defineProperty(exports, "version", ({
+  enumerable: true,
+  get: function () {
+    return _version.default;
+  }
+}));
+
+var _v = _interopRequireDefault(__nccwpck_require__(5031));
+
+var _v2 = _interopRequireDefault(__nccwpck_require__(3762));
+
+var _v3 = _interopRequireDefault(__nccwpck_require__(5061));
+
+var _v4 = _interopRequireDefault(__nccwpck_require__(7018));
+
+var _nil = _interopRequireDefault(__nccwpck_require__(2768));
+
+var _version = _interopRequireDefault(__nccwpck_require__(2996));
+
+var _validate = _interopRequireDefault(__nccwpck_require__(1645));
+
+var _stringify = _interopRequireDefault(__nccwpck_require__(9443));
+
+var _parse = _interopRequireDefault(__nccwpck_require__(5733));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+/***/ }),
+
+/***/ 3063:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = void 0;
+
+var _crypto = _interopRequireDefault(__nccwpck_require__(6113));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function md5(bytes) {
+  if (Array.isArray(bytes)) {
+    bytes = Buffer.from(bytes);
+  } else if (typeof bytes === 'string') {
+    bytes = Buffer.from(bytes, 'utf8');
+  }
+
+  return _crypto.default.createHash('md5').update(bytes).digest();
+}
+
+var _default = md5;
+exports["default"] = _default;
+
+/***/ }),
+
+/***/ 4060:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = void 0;
+
+var _crypto = _interopRequireDefault(__nccwpck_require__(6113));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+var _default = {
+  randomUUID: _crypto.default.randomUUID
+};
+exports["default"] = _default;
+
+/***/ }),
+
+/***/ 2768:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = void 0;
+var _default = '00000000-0000-0000-0000-000000000000';
+exports["default"] = _default;
+
+/***/ }),
+
+/***/ 5733:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = void 0;
+
+var _validate = _interopRequireDefault(__nccwpck_require__(1645));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function parse(uuid) {
+  if (!(0, _validate.default)(uuid)) {
+    throw TypeError('Invalid UUID');
+  }
+
+  let v;
+  const arr = new Uint8Array(16); // Parse ########-....-....-....-............
+
+  arr[0] = (v = parseInt(uuid.slice(0, 8), 16)) >>> 24;
+  arr[1] = v >>> 16 & 0xff;
+  arr[2] = v >>> 8 & 0xff;
+  arr[3] = v & 0xff; // Parse ........-####-....-....-............
+
+  arr[4] = (v = parseInt(uuid.slice(9, 13), 16)) >>> 8;
+  arr[5] = v & 0xff; // Parse ........-....-####-....-............
+
+  arr[6] = (v = parseInt(uuid.slice(14, 18), 16)) >>> 8;
+  arr[7] = v & 0xff; // Parse ........-....-....-####-............
+
+  arr[8] = (v = parseInt(uuid.slice(19, 23), 16)) >>> 8;
+  arr[9] = v & 0xff; // Parse ........-....-....-....-############
+  // (Use "/" to avoid 32-bit truncation when bit-shifting high-order bytes)
+
+  arr[10] = (v = parseInt(uuid.slice(24, 36), 16)) / 0x10000000000 & 0xff;
+  arr[11] = v / 0x100000000 & 0xff;
+  arr[12] = v >>> 24 & 0xff;
+  arr[13] = v >>> 16 & 0xff;
+  arr[14] = v >>> 8 & 0xff;
+  arr[15] = v & 0xff;
+  return arr;
+}
+
+var _default = parse;
+exports["default"] = _default;
+
+/***/ }),
+
+/***/ 2449:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = void 0;
+var _default = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000)$/i;
+exports["default"] = _default;
+
+/***/ }),
+
+/***/ 3142:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = rng;
+
+var _crypto = _interopRequireDefault(__nccwpck_require__(6113));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+const rnds8Pool = new Uint8Array(256); // # of random values to pre-allocate
+
+let poolPtr = rnds8Pool.length;
+
+function rng() {
+  if (poolPtr > rnds8Pool.length - 16) {
+    _crypto.default.randomFillSync(rnds8Pool);
+
+    poolPtr = 0;
+  }
+
+  return rnds8Pool.slice(poolPtr, poolPtr += 16);
+}
+
+/***/ }),
+
+/***/ 1672:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = void 0;
+
+var _crypto = _interopRequireDefault(__nccwpck_require__(6113));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function sha1(bytes) {
+  if (Array.isArray(bytes)) {
+    bytes = Buffer.from(bytes);
+  } else if (typeof bytes === 'string') {
+    bytes = Buffer.from(bytes, 'utf8');
+  }
+
+  return _crypto.default.createHash('sha1').update(bytes).digest();
+}
+
+var _default = sha1;
+exports["default"] = _default;
+
+/***/ }),
+
+/***/ 9443:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = void 0;
+exports.unsafeStringify = unsafeStringify;
+
+var _validate = _interopRequireDefault(__nccwpck_require__(1645));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+/**
+ * Convert array of 16 byte values to UUID string format of the form:
+ * XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+ */
+const byteToHex = [];
+
+for (let i = 0; i < 256; ++i) {
+  byteToHex.push((i + 0x100).toString(16).slice(1));
+}
+
+function unsafeStringify(arr, offset = 0) {
+  // Note: Be careful editing this code!  It's been tuned for performance
+  // and works in ways you may not expect. See https://github.com/uuidjs/uuid/pull/434
+  return byteToHex[arr[offset + 0]] + byteToHex[arr[offset + 1]] + byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + '-' + byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + '-' + byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + '-' + byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + '-' + byteToHex[arr[offset + 10]] + byteToHex[arr[offset + 11]] + byteToHex[arr[offset + 12]] + byteToHex[arr[offset + 13]] + byteToHex[arr[offset + 14]] + byteToHex[arr[offset + 15]];
+}
+
+function stringify(arr, offset = 0) {
+  const uuid = unsafeStringify(arr, offset); // Consistency check for valid UUID.  If this throws, it's likely due to one
+  // of the following:
+  // - One or more input array values don't map to a hex octet (leading to
+  // "undefined" in the uuid)
+  // - Invalid input values for the RFC `version` or `variant` fields
+
+  if (!(0, _validate.default)(uuid)) {
+    throw TypeError('Stringified UUID is invalid');
+  }
+
+  return uuid;
+}
+
+var _default = stringify;
+exports["default"] = _default;
+
+/***/ }),
+
+/***/ 5031:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = void 0;
+
+var _rng = _interopRequireDefault(__nccwpck_require__(3142));
+
+var _stringify = __nccwpck_require__(9443);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+// **`v1()` - Generate time-based UUID**
+//
+// Inspired by https://github.com/LiosK/UUID.js
+// and http://docs.python.org/library/uuid.html
+let _nodeId;
+
+let _clockseq; // Previous uuid creation time
+
+
+let _lastMSecs = 0;
+let _lastNSecs = 0; // See https://github.com/uuidjs/uuid for API details
+
+function v1(options, buf, offset) {
+  let i = buf && offset || 0;
+  const b = buf || new Array(16);
+  options = options || {};
+  let node = options.node || _nodeId;
+  let clockseq = options.clockseq !== undefined ? options.clockseq : _clockseq; // node and clockseq need to be initialized to random values if they're not
+  // specified.  We do this lazily to minimize issues related to insufficient
+  // system entropy.  See #189
+
+  if (node == null || clockseq == null) {
+    const seedBytes = options.random || (options.rng || _rng.default)();
+
+    if (node == null) {
+      // Per 4.5, create and 48-bit node id, (47 random bits + multicast bit = 1)
+      node = _nodeId = [seedBytes[0] | 0x01, seedBytes[1], seedBytes[2], seedBytes[3], seedBytes[4], seedBytes[5]];
+    }
+
+    if (clockseq == null) {
+      // Per 4.2.2, randomize (14 bit) clockseq
+      clockseq = _clockseq = (seedBytes[6] << 8 | seedBytes[7]) & 0x3fff;
+    }
+  } // UUID timestamps are 100 nano-second units since the Gregorian epoch,
+  // (1582-10-15 00:00).  JSNumbers aren't precise enough for this, so
+  // time is handled internally as 'msecs' (integer milliseconds) and 'nsecs'
+  // (100-nanoseconds offset from msecs) since unix epoch, 1970-01-01 00:00.
+
+
+  let msecs = options.msecs !== undefined ? options.msecs : Date.now(); // Per 4.2.1.2, use count of uuid's generated during the current clock
+  // cycle to simulate higher resolution clock
+
+  let nsecs = options.nsecs !== undefined ? options.nsecs : _lastNSecs + 1; // Time since last uuid creation (in msecs)
+
+  const dt = msecs - _lastMSecs + (nsecs - _lastNSecs) / 10000; // Per 4.2.1.2, Bump clockseq on clock regression
+
+  if (dt < 0 && options.clockseq === undefined) {
+    clockseq = clockseq + 1 & 0x3fff;
+  } // Reset nsecs if clock regresses (new clockseq) or we've moved onto a new
+  // time interval
+
+
+  if ((dt < 0 || msecs > _lastMSecs) && options.nsecs === undefined) {
+    nsecs = 0;
+  } // Per 4.2.1.2 Throw error if too many uuids are requested
+
+
+  if (nsecs >= 10000) {
+    throw new Error("uuid.v1(): Can't create more than 10M uuids/sec");
+  }
+
+  _lastMSecs = msecs;
+  _lastNSecs = nsecs;
+  _clockseq = clockseq; // Per 4.1.4 - Convert from unix epoch to Gregorian epoch
+
+  msecs += 12219292800000; // `time_low`
+
+  const tl = ((msecs & 0xfffffff) * 10000 + nsecs) % 0x100000000;
+  b[i++] = tl >>> 24 & 0xff;
+  b[i++] = tl >>> 16 & 0xff;
+  b[i++] = tl >>> 8 & 0xff;
+  b[i++] = tl & 0xff; // `time_mid`
+
+  const tmh = msecs / 0x100000000 * 10000 & 0xfffffff;
+  b[i++] = tmh >>> 8 & 0xff;
+  b[i++] = tmh & 0xff; // `time_high_and_version`
+
+  b[i++] = tmh >>> 24 & 0xf | 0x10; // include version
+
+  b[i++] = tmh >>> 16 & 0xff; // `clock_seq_hi_and_reserved` (Per 4.2.2 - include variant)
+
+  b[i++] = clockseq >>> 8 | 0x80; // `clock_seq_low`
+
+  b[i++] = clockseq & 0xff; // `node`
+
+  for (let n = 0; n < 6; ++n) {
+    b[i + n] = node[n];
+  }
+
+  return buf || (0, _stringify.unsafeStringify)(b);
+}
+
+var _default = v1;
+exports["default"] = _default;
+
+/***/ }),
+
+/***/ 3762:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = void 0;
+
+var _v = _interopRequireDefault(__nccwpck_require__(8845));
+
+var _md = _interopRequireDefault(__nccwpck_require__(3063));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+const v3 = (0, _v.default)('v3', 0x30, _md.default);
+var _default = v3;
+exports["default"] = _default;
+
+/***/ }),
+
+/***/ 8845:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports.URL = exports.DNS = void 0;
+exports["default"] = v35;
+
+var _stringify = __nccwpck_require__(9443);
+
+var _parse = _interopRequireDefault(__nccwpck_require__(5733));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function stringToBytes(str) {
+  str = unescape(encodeURIComponent(str)); // UTF8 escape
+
+  const bytes = [];
+
+  for (let i = 0; i < str.length; ++i) {
+    bytes.push(str.charCodeAt(i));
+  }
+
+  return bytes;
+}
+
+const DNS = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
+exports.DNS = DNS;
+const URL = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
+exports.URL = URL;
+
+function v35(name, version, hashfunc) {
+  function generateUUID(value, namespace, buf, offset) {
+    var _namespace;
+
+    if (typeof value === 'string') {
+      value = stringToBytes(value);
+    }
+
+    if (typeof namespace === 'string') {
+      namespace = (0, _parse.default)(namespace);
+    }
+
+    if (((_namespace = namespace) === null || _namespace === void 0 ? void 0 : _namespace.length) !== 16) {
+      throw TypeError('Namespace must be array-like (16 iterable integer values, 0-255)');
+    } // Compute hash of namespace and value, Per 4.3
+    // Future: Use spread syntax when supported on all platforms, e.g. `bytes =
+    // hashfunc([...namespace, ... value])`
+
+
+    let bytes = new Uint8Array(16 + value.length);
+    bytes.set(namespace);
+    bytes.set(value, namespace.length);
+    bytes = hashfunc(bytes);
+    bytes[6] = bytes[6] & 0x0f | version;
+    bytes[8] = bytes[8] & 0x3f | 0x80;
+
+    if (buf) {
+      offset = offset || 0;
+
+      for (let i = 0; i < 16; ++i) {
+        buf[offset + i] = bytes[i];
+      }
+
+      return buf;
+    }
+
+    return (0, _stringify.unsafeStringify)(bytes);
+  } // Function#name is not settable on some platforms (#270)
+
+
+  try {
+    generateUUID.name = name; // eslint-disable-next-line no-empty
+  } catch (err) {} // For CommonJS default export support
+
+
+  generateUUID.DNS = DNS;
+  generateUUID.URL = URL;
+  return generateUUID;
+}
+
+/***/ }),
+
+/***/ 5061:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = void 0;
+
+var _native = _interopRequireDefault(__nccwpck_require__(4060));
+
+var _rng = _interopRequireDefault(__nccwpck_require__(3142));
+
+var _stringify = __nccwpck_require__(9443);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function v4(options, buf, offset) {
+  if (_native.default.randomUUID && !buf && !options) {
+    return _native.default.randomUUID();
+  }
+
+  options = options || {};
+
+  const rnds = options.random || (options.rng || _rng.default)(); // Per 4.4, set bits for version and `clock_seq_hi_and_reserved`
+
+
+  rnds[6] = rnds[6] & 0x0f | 0x40;
+  rnds[8] = rnds[8] & 0x3f | 0x80; // Copy bytes to buffer, if provided
+
+  if (buf) {
+    offset = offset || 0;
+
+    for (let i = 0; i < 16; ++i) {
+      buf[offset + i] = rnds[i];
+    }
+
+    return buf;
+  }
+
+  return (0, _stringify.unsafeStringify)(rnds);
+}
+
+var _default = v4;
+exports["default"] = _default;
+
+/***/ }),
+
+/***/ 7018:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = void 0;
+
+var _v = _interopRequireDefault(__nccwpck_require__(8845));
+
+var _sha = _interopRequireDefault(__nccwpck_require__(1672));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+const v5 = (0, _v.default)('v5', 0x50, _sha.default);
+var _default = v5;
+exports["default"] = _default;
+
+/***/ }),
+
+/***/ 1645:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = void 0;
+
+var _regex = _interopRequireDefault(__nccwpck_require__(2449));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function validate(uuid) {
+  return typeof uuid === 'string' && _regex.default.test(uuid);
+}
+
+var _default = validate;
+exports["default"] = _default;
+
+/***/ }),
+
+/***/ 2996:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+exports["default"] = void 0;
+
+var _validate = _interopRequireDefault(__nccwpck_require__(1645));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function version(uuid) {
+  if (!(0, _validate.default)(uuid)) {
+    throw TypeError('Invalid UUID');
+  }
+
+  return parseInt(uuid.slice(14, 15), 16);
+}
+
+var _default = version;
+exports["default"] = _default;
+
+/***/ }),
+
 /***/ 3128:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -14049,6 +20611,7 @@ const git_1 = __nccwpck_require__(6350);
 const lcov_1 = __nccwpck_require__(4888);
 const message_1 = __nccwpck_require__(7899);
 const semaphor_1 = __nccwpck_require__(3624);
+const pull_request_1 = __nccwpck_require__(5338);
 /**
  * The main function for the action.
  */
@@ -14079,6 +20642,14 @@ async function run() {
             try {
                 core.info('Updating and pushing coverage badge...');
                 await (0, badge_1.generateBadges)(coveredProjects);
+                const changes = await (0, git_1.getChanges)();
+                if (changes) {
+                    core.info(`Found changes to coverage: ${changes}`);
+                    (0, pull_request_1.createPr)(changes, coveredProjects);
+                }
+                else {
+                    core.info('No changes to commit.');
+                }
             }
             catch (error) {
                 core.warning(`Failed to commit and push coverage badge due to ${error}.`);
@@ -14277,6 +20848,59 @@ function buildBadge(upper, lower, percentage) {
 
 /***/ }),
 
+/***/ 5338:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createPr = void 0;
+const create_pull_request_1 = __nccwpck_require__(2769);
+const config_1 = __nccwpck_require__(6373);
+const core_1 = __nccwpck_require__(2186);
+const github_1 = __nccwpck_require__(5438);
+function createPr(changes, coveredProjects) {
+    (0, create_pull_request_1.createPullRequest)({
+        token: config_1.Config.githubToken,
+        gitToken: config_1.Config.githubToken,
+        path: (0, core_1.getInput)('$GITHUB_WORKSPACE'),
+        addPaths: [],
+        commitMessage: "chore: update coverage",
+        committer: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>",
+        author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>",
+        signoff: false,
+        branch: "chore/update-coverage",
+        deleteBranch: true,
+        branchSuffix: "",
+        base: "",
+        pushToFork: "",
+        title: "chore: update coverage",
+        body: buildPrMessage(coveredProjects),
+        bodyPath: "",
+        labels: [],
+        assignees: [],
+        reviewers: [],
+        teamReviewers: [],
+        milestone: Number(""),
+        draft: false,
+    });
+}
+exports.createPr = createPr;
+function buildPrMessage(coveredProjects) {
+    // Get current commit from push event
+    const sha = github_1.context.sha;
+    const url = github_1.context.payload.repository?.html_url;
+    let md = '';
+    md += '# Update Coverage\n';
+    md += '\n';
+    md += `Commit (${sha})[${url}] changed the coverage for this repository.\n`;
+    md += 'This PR updates all files in accordance.\n';
+    return md;
+}
+
+
+/***/ }),
+
 /***/ 3624:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -14375,6 +20999,1286 @@ function verifyNoCoverageDecrease(projects) {
     return true;
 }
 exports.verifyNoCoverageDecrease = verifyNoCoverageDecrease;
+
+
+/***/ }),
+
+/***/ 737:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createOrUpdateBranch = exports.tryFetch = exports.getWorkingBaseAndType = exports.WorkingBaseType = void 0;
+const core = __importStar(__nccwpck_require__(2186));
+const uuid_1 = __nccwpck_require__(2473);
+const CHERRYPICK_EMPTY = 'The previous cherry-pick is now empty, possibly due to conflict resolution.';
+const NOTHING_TO_COMMIT = 'nothing to commit, working tree clean';
+var WorkingBaseType;
+(function (WorkingBaseType) {
+    WorkingBaseType["Branch"] = "branch";
+    WorkingBaseType["Commit"] = "commit";
+})(WorkingBaseType || (exports.WorkingBaseType = WorkingBaseType = {}));
+async function getWorkingBaseAndType(git) {
+    const symbolicRefResult = await git.exec(['symbolic-ref', 'HEAD', '--short'], true);
+    if (symbolicRefResult.exitCode == 0) {
+        // A ref is checked out
+        return [symbolicRefResult.stdout.trim(), WorkingBaseType.Branch];
+    }
+    else {
+        // A commit is checked out (detached HEAD)
+        const headSha = await git.revParse('HEAD');
+        return [headSha, WorkingBaseType.Commit];
+    }
+}
+exports.getWorkingBaseAndType = getWorkingBaseAndType;
+async function tryFetch(git, remote, branch) {
+    try {
+        await git.fetch([`${branch}:refs/remotes/${remote}/${branch}`], remote, [
+            '--force'
+        ]);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+exports.tryFetch = tryFetch;
+// Return the number of commits that branch2 is ahead of branch1
+async function commitsAhead(git, branch1, branch2) {
+    const result = await git.revList([`${branch1}...${branch2}`], ['--right-only', '--count']);
+    return Number(result);
+}
+// Return true if branch2 is ahead of branch1
+async function isAhead(git, branch1, branch2) {
+    return (await commitsAhead(git, branch1, branch2)) > 0;
+}
+// Return the number of commits that branch2 is behind branch1
+async function commitsBehind(git, branch1, branch2) {
+    const result = await git.revList([`${branch1}...${branch2}`], ['--left-only', '--count']);
+    return Number(result);
+}
+// Return true if branch2 is behind branch1
+async function isBehind(git, branch1, branch2) {
+    return (await commitsBehind(git, branch1, branch2)) > 0;
+}
+// Return true if branch2 is even with branch1
+async function isEven(git, branch1, branch2) {
+    return (!(await isAhead(git, branch1, branch2)) &&
+        !(await isBehind(git, branch1, branch2)));
+}
+function splitLines(multilineString) {
+    return multilineString
+        .split('\n')
+        .map(s => s.trim())
+        .filter(x => x !== '');
+}
+async function createOrUpdateBranch(git, commitMessage, base, branch, branchRemoteName, signoff, addPaths) {
+    // Get the working base.
+    // When a ref, it may or may not be the actual base.
+    // When a commit, we must rebase onto the actual base.
+    const [workingBase, workingBaseType] = await getWorkingBaseAndType(git);
+    core.info(`Working base is ${workingBaseType} '${workingBase}'`);
+    if (workingBaseType == WorkingBaseType.Commit && !base) {
+        throw new Error(`When in 'detached HEAD' state, 'base' must be supplied.`);
+    }
+    // If the base is not specified it is assumed to be the working base.
+    base = base ? base : workingBase;
+    const baseRemote = 'origin';
+    // Set the default return values
+    const result = {
+        action: 'none',
+        base: base,
+        hasDiffWithBase: false,
+        headSha: ''
+    };
+    // Save the working base changes to a temporary branch
+    const tempBranch = (0, uuid_1.v4)();
+    await git.checkout(tempBranch, 'HEAD');
+    // Commit any uncommitted changes
+    if (await git.isDirty(true, addPaths)) {
+        core.info('Uncommitted changes found. Adding a commit.');
+        const aopts = ['add'];
+        if (addPaths.length > 0) {
+            aopts.push(...['--', ...addPaths]);
+        }
+        else {
+            aopts.push('-A');
+        }
+        await git.exec(aopts, true);
+        const popts = ['-m', commitMessage];
+        if (signoff) {
+            popts.push('--signoff');
+        }
+        const commitResult = await git.commit(popts, true);
+        // 'nothing to commit' can occur when core.autocrlf is set to true
+        if (commitResult.exitCode != 0 &&
+            !commitResult.stdout.includes(NOTHING_TO_COMMIT)) {
+            throw new Error(`Unexpected error: ${commitResult.stderr}`);
+        }
+    }
+    // Stash any uncommitted tracked and untracked changes
+    const stashed = await git.stashPush(['--include-untracked']);
+    // Perform fetch and reset the working base
+    // Commits made during the workflow will be removed
+    if (workingBaseType == WorkingBaseType.Branch) {
+        core.info(`Resetting working base branch '${workingBase}'`);
+        if (branchRemoteName == 'fork') {
+            // If pushing to a fork we must fetch with 'unshallow' to avoid the following error on git push
+            // ! [remote rejected] HEAD -> tests/push-branch-to-fork (shallow update not allowed)
+            await git.fetch([`${workingBase}:${workingBase}`], baseRemote, ['--force'], true);
+        }
+        else {
+            // If the remote is 'origin' we can git reset
+            await git.checkout(workingBase);
+            await git.exec(['reset', '--hard', `${baseRemote}/${workingBase}`]);
+        }
+    }
+    // If the working base is not the base, rebase the temp branch commits
+    // This will also be true if the working base type is a commit
+    if (workingBase != base) {
+        core.info(`Rebasing commits made to ${workingBaseType} '${workingBase}' on to base branch '${base}'`);
+        const fetchArgs = ['--force'];
+        if (branchRemoteName != 'fork') {
+            // If pushing to a fork we cannot shallow fetch otherwise the 'shallow update not allowed' error occurs
+            fetchArgs.push('--depth=1');
+        }
+        // Checkout the actual base
+        await git.fetch([`${base}:${base}`], baseRemote, fetchArgs);
+        await git.checkout(base);
+        // Cherrypick commits from the temporary branch starting from the working base
+        const commits = await git.revList([`${workingBase}..${tempBranch}`, '.'], ['--reverse']);
+        for (const commit of splitLines(commits)) {
+            const result = await git.cherryPick(['--strategy=recursive', '--strategy-option=theirs', commit], true);
+            if (result.exitCode != 0 && !result.stderr.includes(CHERRYPICK_EMPTY)) {
+                throw new Error(`Unexpected error: ${result.stderr}`);
+            }
+        }
+        // Reset the temp branch to the working index
+        await git.checkout(tempBranch, 'HEAD');
+        // Reset the base
+        await git.fetch([`${base}:${base}`], baseRemote, fetchArgs);
+    }
+    // Try to fetch the pull request branch
+    if (!(await tryFetch(git, branchRemoteName, branch))) {
+        // The pull request branch does not exist
+        core.info(`Pull request branch '${branch}' does not exist yet.`);
+        // Create the pull request branch
+        await git.checkout(branch, tempBranch);
+        // Check if the pull request branch is ahead of the base
+        result.hasDiffWithBase = await isAhead(git, base, branch);
+        if (result.hasDiffWithBase) {
+            result.action = 'created';
+            core.info(`Created branch '${branch}'`);
+        }
+        else {
+            core.info(`Branch '${branch}' is not ahead of base '${base}' and will not be created`);
+        }
+    }
+    else {
+        // The pull request branch exists
+        core.info(`Pull request branch '${branch}' already exists as remote branch '${branchRemoteName}/${branch}'`);
+        // Checkout the pull request branch
+        await git.checkout(branch);
+        // Reset the branch if one of the following conditions is true.
+        // - If the branch differs from the recreated temp branch.
+        // - If the recreated temp branch is not ahead of the base. This means there will be
+        //   no pull request diff after the branch is reset. This will reset any undeleted
+        //   branches after merging. In particular, it catches a case where the branch was
+        //   squash merged but not deleted. We need to reset to make sure it doesn't appear
+        //   to have a diff with the base due to different commits for the same changes.
+        // - If the number of commits ahead of the base branch differs between the branch and
+        //   temp branch. This catches a case where the base branch has been force pushed to
+        //   a new commit.
+        // For changes on base this reset is equivalent to a rebase of the pull request branch.
+        const tempBranchCommitsAhead = await commitsAhead(git, base, tempBranch);
+        const branchCommitsAhead = await commitsAhead(git, base, branch);
+        if ((await git.hasDiff([`${branch}..${tempBranch}`])) ||
+            branchCommitsAhead != tempBranchCommitsAhead ||
+            !(tempBranchCommitsAhead > 0) // !isAhead
+        ) {
+            core.info(`Resetting '${branch}'`);
+            // Alternatively, git switch -C branch tempBranch
+            await git.checkout(branch, tempBranch);
+        }
+        // Check if the pull request branch has been updated
+        // If the branch was reset or updated it will be ahead
+        // It may be behind if a reset now results in no diff with the base
+        if (!(await isEven(git, `${branchRemoteName}/${branch}`, branch))) {
+            result.action = 'updated';
+            core.info(`Updated branch '${branch}'`);
+        }
+        else {
+            result.action = 'not-updated';
+            core.info(`Branch '${branch}' is even with its remote and will not be updated`);
+        }
+        // Check if the pull request branch is ahead of the base
+        result.hasDiffWithBase = await isAhead(git, base, branch);
+    }
+    // Get the pull request branch SHA
+    result.headSha = await git.revParse('HEAD');
+    // Delete the temporary branch
+    await git.exec(['branch', '--delete', '--force', tempBranch]);
+    // Checkout the working base to leave the local repository as it was found
+    await git.checkout(workingBase);
+    // Restore any stashed changes
+    if (stashed) {
+        await git.stashPop();
+    }
+    return result;
+}
+exports.createOrUpdateBranch = createOrUpdateBranch;
+
+
+/***/ }),
+
+/***/ 2769:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createPullRequest = void 0;
+const core = __importStar(__nccwpck_require__(2186));
+const create_or_update_branch_1 = __nccwpck_require__(737);
+const github_helper_1 = __nccwpck_require__(9008);
+const git_command_manager_1 = __nccwpck_require__(8976);
+const git_config_helper_1 = __nccwpck_require__(3469);
+const utils = __importStar(__nccwpck_require__(6169));
+async function createPullRequest(inputs) {
+    let gitConfigHelper, git;
+    try {
+        core.startGroup('Prepare git configuration');
+        const repoPath = utils.getRepoPath(inputs.path);
+        git = await git_command_manager_1.GitCommandManager.create(repoPath);
+        gitConfigHelper = await git_config_helper_1.GitConfigHelper.create(git);
+        core.endGroup();
+        core.startGroup('Determining the base and head repositories');
+        const baseRemote = gitConfigHelper.getGitRemote();
+        // Init the GitHub client
+        const githubHelper = new github_helper_1.GitHubHelper(baseRemote.hostname, inputs.token);
+        // Determine the head repository; the target for the pull request branch
+        const branchRemoteName = inputs.pushToFork ? 'fork' : 'origin';
+        const branchRepository = inputs.pushToFork
+            ? inputs.pushToFork
+            : baseRemote.repository;
+        if (inputs.pushToFork) {
+            // Check if the supplied fork is really a fork of the base
+            core.info(`Checking if '${branchRepository}' is a fork of '${baseRemote.repository}'`);
+            const baseParentRepository = await githubHelper.getRepositoryParent(baseRemote.repository);
+            const branchParentRepository = await githubHelper.getRepositoryParent(branchRepository);
+            if (branchParentRepository == null) {
+                throw new Error(`Repository '${branchRepository}' is not a fork. Unable to continue.`);
+            }
+            if (branchParentRepository != baseRemote.repository &&
+                baseParentRepository != branchParentRepository) {
+                throw new Error(`Repository '${branchRepository}' is not a fork of '${baseRemote.repository}', nor are they siblings. Unable to continue.`);
+            }
+            // Add a remote for the fork
+            const remoteUrl = utils.getRemoteUrl(baseRemote.protocol, baseRemote.hostname, branchRepository);
+            await git.exec(['remote', 'add', 'fork', remoteUrl]);
+        }
+        core.endGroup();
+        core.info(`Pull request branch target repository set to ${branchRepository}`);
+        // Configure auth
+        if (baseRemote.protocol == 'HTTPS') {
+            core.startGroup('Configuring credential for HTTPS authentication');
+            await gitConfigHelper.configureToken(inputs.gitToken);
+            core.endGroup();
+        }
+        core.startGroup('Checking the base repository state');
+        const [workingBase, workingBaseType] = await (0, create_or_update_branch_1.getWorkingBaseAndType)(git);
+        core.info(`Working base is ${workingBaseType} '${workingBase}'`);
+        // When in detached HEAD state (checked out on a commit), we need to
+        // know the 'base' branch in order to rebase changes.
+        if (workingBaseType == create_or_update_branch_1.WorkingBaseType.Commit && !inputs.base) {
+            throw new Error(`When the repository is checked out on a commit instead of a branch, the 'base' input must be supplied.`);
+        }
+        // If the base is not specified it is assumed to be the working base.
+        const base = inputs.base ? inputs.base : workingBase;
+        // Throw an error if the base and branch are not different branches
+        // of the 'origin' remote. An identically named branch in the `fork`
+        // remote is perfectly fine.
+        if (branchRemoteName == 'origin' && base == inputs.branch) {
+            throw new Error(`The 'base' and 'branch' for a pull request must be different branches. Unable to continue.`);
+        }
+        // For self-hosted runners the repository state persists between runs.
+        // This command prunes the stale remote ref when the pull request branch was
+        // deleted after being merged or closed. Without this the push using
+        // '--force-with-lease' fails due to "stale info."
+        // https://github.com/peter-evans/create-pull-request/issues/633
+        await git.exec(['remote', 'prune', branchRemoteName]);
+        core.endGroup();
+        // Apply the branch suffix if set
+        if (inputs.branchSuffix) {
+            switch (inputs.branchSuffix) {
+                case 'short-commit-hash':
+                    // Suffix with the short SHA1 hash
+                    inputs.branch = `${inputs.branch}-${await git.revParse('HEAD', [
+                        '--short'
+                    ])}`;
+                    break;
+                case 'timestamp':
+                    // Suffix with the current timestamp
+                    inputs.branch = `${inputs.branch}-${utils.secondsSinceEpoch()}`;
+                    break;
+                case 'random':
+                    // Suffix with a 7 character random string
+                    inputs.branch = `${inputs.branch}-${utils.randomString()}`;
+                    break;
+                default:
+                    throw new Error(`Branch suffix '${inputs.branchSuffix}' is not a valid value. Unable to continue.`);
+            }
+        }
+        // Output head branch
+        core.info(`Pull request branch to create or update set to '${inputs.branch}'`);
+        // Configure the committer and author
+        core.startGroup('Configuring the committer and author');
+        const parsedAuthor = utils.parseDisplayNameEmail(inputs.author);
+        const parsedCommitter = utils.parseDisplayNameEmail(inputs.committer);
+        git.setIdentityGitOptions([
+            '-c',
+            `author.name=${parsedAuthor.name}`,
+            '-c',
+            `author.email=${parsedAuthor.email}`,
+            '-c',
+            `committer.name=${parsedCommitter.name}`,
+            '-c',
+            `committer.email=${parsedCommitter.email}`
+        ]);
+        core.info(`Configured git committer as '${parsedCommitter.name} <${parsedCommitter.email}>'`);
+        core.info(`Configured git author as '${parsedAuthor.name} <${parsedAuthor.email}>'`);
+        core.endGroup();
+        // Create or update the pull request branch
+        core.startGroup('Create or update the pull request branch');
+        const result = await (0, create_or_update_branch_1.createOrUpdateBranch)(git, inputs.commitMessage, inputs.base, inputs.branch, branchRemoteName, inputs.signoff, inputs.addPaths);
+        core.endGroup();
+        if (['created', 'updated'].includes(result.action)) {
+            // The branch was created or updated
+            core.startGroup(`Pushing pull request branch to '${branchRemoteName}/${inputs.branch}'`);
+            await git.push([
+                '--force-with-lease',
+                branchRemoteName,
+                `${inputs.branch}:refs/heads/${inputs.branch}`
+            ]);
+            core.endGroup();
+        }
+        // Set the base. It would have been '' if not specified as an input
+        inputs.base = result.base;
+        if (result.hasDiffWithBase) {
+            // Create or update the pull request
+            core.startGroup('Create or update the pull request');
+            const pull = await githubHelper.createOrUpdatePullRequest(inputs, baseRemote.repository, branchRepository);
+            core.endGroup();
+            // Set outputs
+            core.startGroup('Setting outputs');
+            core.setOutput('pull-request-number', pull.number);
+            core.setOutput('pull-request-url', pull.html_url);
+            if (pull.created) {
+                core.setOutput('pull-request-operation', 'created');
+            }
+            else if (result.action == 'updated') {
+                core.setOutput('pull-request-operation', 'updated');
+            }
+            core.setOutput('pull-request-head-sha', result.headSha);
+            // Deprecated
+            core.exportVariable('PULL_REQUEST_NUMBER', pull.number);
+            core.endGroup();
+        }
+        else {
+            // There is no longer a diff with the base
+            // Check we are in a state where a branch exists
+            if (['updated', 'not-updated'].includes(result.action)) {
+                core.info(`Branch '${inputs.branch}' no longer differs from base branch '${inputs.base}'`);
+                if (inputs.deleteBranch) {
+                    core.info(`Deleting branch '${inputs.branch}'`);
+                    await git.push([
+                        '--delete',
+                        '--force',
+                        branchRemoteName,
+                        `refs/heads/${inputs.branch}`
+                    ]);
+                    // Set outputs
+                    core.startGroup('Setting outputs');
+                    core.setOutput('pull-request-operation', 'closed');
+                    core.endGroup();
+                }
+            }
+        }
+    }
+    catch (error) {
+        core.setFailed(utils.getErrorMessage(error));
+    }
+    finally {
+        core.startGroup('Restore git configuration');
+        if (inputs.pushToFork) {
+            await git.exec(['remote', 'rm', 'fork']);
+        }
+        await gitConfigHelper.close();
+        core.endGroup();
+    }
+}
+exports.createPullRequest = createPullRequest;
+
+
+/***/ }),
+
+/***/ 8976:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.GitCommandManager = void 0;
+const exec = __importStar(__nccwpck_require__(1514));
+const io = __importStar(__nccwpck_require__(7436));
+const utils = __importStar(__nccwpck_require__(6169));
+const path = __importStar(__nccwpck_require__(1017));
+const tagsRefSpec = '+refs/tags/*:refs/tags/*';
+class GitCommandManager {
+    gitPath;
+    workingDirectory;
+    // Git options used when commands require an identity
+    identityGitOptions;
+    constructor(workingDirectory, gitPath) {
+        this.workingDirectory = workingDirectory;
+        this.gitPath = gitPath;
+    }
+    static async create(workingDirectory) {
+        const gitPath = await io.which('git', true);
+        return new GitCommandManager(workingDirectory, gitPath);
+    }
+    setIdentityGitOptions(identityGitOptions) {
+        this.identityGitOptions = identityGitOptions;
+    }
+    async checkout(ref, startPoint) {
+        const args = ['checkout', '--progress'];
+        if (startPoint) {
+            args.push('-B', ref, startPoint);
+        }
+        else {
+            args.push(ref);
+        }
+        // https://github.com/git/git/commit/a047fafc7866cc4087201e284dc1f53e8f9a32d5
+        args.push('--');
+        await this.exec(args);
+    }
+    async cherryPick(options, allowAllExitCodes = false) {
+        const args = ['cherry-pick'];
+        if (this.identityGitOptions) {
+            args.unshift(...this.identityGitOptions);
+        }
+        if (options) {
+            args.push(...options);
+        }
+        return await this.exec(args, allowAllExitCodes);
+    }
+    async commit(options, allowAllExitCodes = false) {
+        const args = ['commit'];
+        if (this.identityGitOptions) {
+            args.unshift(...this.identityGitOptions);
+        }
+        if (options) {
+            args.push(...options);
+        }
+        return await this.exec(args, allowAllExitCodes);
+    }
+    async config(configKey, configValue, globalConfig, add) {
+        const args = ['config', globalConfig ? '--global' : '--local'];
+        if (add) {
+            args.push('--add');
+        }
+        args.push(...[configKey, configValue]);
+        await this.exec(args);
+    }
+    async configExists(configKey, configValue = '.', globalConfig) {
+        const output = await this.exec([
+            'config',
+            globalConfig ? '--global' : '--local',
+            '--name-only',
+            '--get-regexp',
+            configKey,
+            configValue
+        ], true);
+        return output.exitCode === 0;
+    }
+    async fetch(refSpec, remoteName, options, unshallow = false) {
+        const args = ['-c', 'protocol.version=2', 'fetch'];
+        if (!refSpec.some(x => x === tagsRefSpec)) {
+            args.push('--no-tags');
+        }
+        args.push('--progress', '--no-recurse-submodules');
+        if (unshallow &&
+            utils.fileExistsSync(path.join(this.workingDirectory, '.git', 'shallow'))) {
+            args.push('--unshallow');
+        }
+        if (options) {
+            args.push(...options);
+        }
+        if (remoteName) {
+            args.push(remoteName);
+        }
+        else {
+            args.push('origin');
+        }
+        for (const arg of refSpec) {
+            args.push(arg);
+        }
+        await this.exec(args);
+    }
+    async getConfigValue(configKey, configValue = '.') {
+        const output = await this.exec([
+            'config',
+            '--local',
+            '--get-regexp',
+            configKey,
+            configValue
+        ]);
+        return output.stdout.trim().split(`${configKey} `)[1];
+    }
+    getGitDirectory() {
+        return this.revParse('--git-dir');
+    }
+    getWorkingDirectory() {
+        return this.workingDirectory;
+    }
+    async hasDiff(options) {
+        const args = ['diff', '--quiet'];
+        if (options) {
+            args.push(...options);
+        }
+        const output = await this.exec(args, true);
+        return output.exitCode === 1;
+    }
+    async isDirty(untracked, pathspec) {
+        const pathspecArgs = pathspec ? ['--', ...pathspec] : [];
+        // Check untracked changes
+        const sargs = ['--porcelain', '-unormal'];
+        sargs.push(...pathspecArgs);
+        if (untracked && (await this.status(sargs))) {
+            return true;
+        }
+        // Check working index changes
+        if (await this.hasDiff(pathspecArgs)) {
+            return true;
+        }
+        // Check staged changes
+        const dargs = ['--staged'];
+        dargs.push(...pathspecArgs);
+        if (await this.hasDiff(dargs)) {
+            return true;
+        }
+        return false;
+    }
+    async push(options) {
+        const args = ['push'];
+        if (options) {
+            args.push(...options);
+        }
+        await this.exec(args);
+    }
+    async revList(commitExpression, options) {
+        const args = ['rev-list'];
+        if (options) {
+            args.push(...options);
+        }
+        args.push(...commitExpression);
+        const output = await this.exec(args);
+        return output.stdout.trim();
+    }
+    async revParse(ref, options) {
+        const args = ['rev-parse'];
+        if (options) {
+            args.push(...options);
+        }
+        args.push(ref);
+        const output = await this.exec(args);
+        return output.stdout.trim();
+    }
+    async stashPush(options) {
+        const args = ['stash', 'push'];
+        if (options) {
+            args.push(...options);
+        }
+        const output = await this.exec(args);
+        return output.stdout.trim() !== 'No local changes to save';
+    }
+    async stashPop(options) {
+        const args = ['stash', 'pop'];
+        if (options) {
+            args.push(...options);
+        }
+        await this.exec(args);
+    }
+    async status(options) {
+        const args = ['status'];
+        if (options) {
+            args.push(...options);
+        }
+        const output = await this.exec(args);
+        return output.stdout.trim();
+    }
+    async symbolicRef(ref, options) {
+        const args = ['symbolic-ref', ref];
+        if (options) {
+            args.push(...options);
+        }
+        const output = await this.exec(args);
+        return output.stdout.trim();
+    }
+    async tryConfigUnset(configKey, configValue = '.', globalConfig) {
+        const output = await this.exec([
+            'config',
+            globalConfig ? '--global' : '--local',
+            '--unset',
+            configKey,
+            configValue
+        ], true);
+        return output.exitCode === 0;
+    }
+    async tryGetRemoteUrl() {
+        const output = await this.exec(['config', '--local', '--get', 'remote.origin.url'], true);
+        if (output.exitCode !== 0) {
+            return '';
+        }
+        const stdout = output.stdout.trim();
+        if (stdout.includes('\n')) {
+            return '';
+        }
+        return stdout;
+    }
+    async exec(args, allowAllExitCodes = false) {
+        const result = new GitOutput();
+        const env = {};
+        for (const key of Object.keys(process.env)) {
+            env[key] = process.env[key];
+        }
+        const stdout = [];
+        const stderr = [];
+        const options = {
+            cwd: this.workingDirectory,
+            env,
+            ignoreReturnCode: allowAllExitCodes,
+            listeners: {
+                stdout: (data) => {
+                    stdout.push(data.toString());
+                },
+                stderr: (data) => {
+                    stderr.push(data.toString());
+                }
+            }
+        };
+        result.exitCode = await exec.exec(`"${this.gitPath}"`, args, options);
+        result.stdout = stdout.join('');
+        result.stderr = stderr.join('');
+        return result;
+    }
+}
+exports.GitCommandManager = GitCommandManager;
+class GitOutput {
+    stdout = '';
+    stderr = '';
+    exitCode = 0;
+}
+
+
+/***/ }),
+
+/***/ 3469:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.GitConfigHelper = void 0;
+const core = __importStar(__nccwpck_require__(2186));
+const fs = __importStar(__nccwpck_require__(7147));
+const path = __importStar(__nccwpck_require__(1017));
+const url_1 = __nccwpck_require__(7310);
+const utils = __importStar(__nccwpck_require__(6169));
+class GitConfigHelper {
+    git;
+    gitConfigPath = '';
+    workingDirectory;
+    safeDirectoryConfigKey = 'safe.directory';
+    safeDirectoryAdded = false;
+    remoteUrl = '';
+    extraheaderConfigKey = '';
+    extraheaderConfigPlaceholderValue = 'AUTHORIZATION: basic ***';
+    extraheaderConfigValueRegex = '^AUTHORIZATION:';
+    persistedExtraheaderConfigValue = '';
+    constructor(git) {
+        this.git = git;
+        this.workingDirectory = this.git.getWorkingDirectory();
+    }
+    static async create(git) {
+        const gitConfigHelper = new GitConfigHelper(git);
+        await gitConfigHelper.addSafeDirectory();
+        await gitConfigHelper.fetchRemoteDetail();
+        await gitConfigHelper.savePersistedAuth();
+        return gitConfigHelper;
+    }
+    async close() {
+        // Remove auth and restore persisted auth config if it existed
+        await this.removeAuth();
+        await this.restorePersistedAuth();
+        await this.removeSafeDirectory();
+    }
+    async addSafeDirectory() {
+        const exists = await this.git.configExists(this.safeDirectoryConfigKey, this.workingDirectory, true);
+        if (!exists) {
+            await this.git.config(this.safeDirectoryConfigKey, this.workingDirectory, true, true);
+            this.safeDirectoryAdded = true;
+        }
+    }
+    async removeSafeDirectory() {
+        if (this.safeDirectoryAdded) {
+            await this.git.tryConfigUnset(this.safeDirectoryConfigKey, this.workingDirectory, true);
+        }
+    }
+    async fetchRemoteDetail() {
+        this.remoteUrl = await this.git.tryGetRemoteUrl();
+    }
+    getGitRemote() {
+        return GitConfigHelper.parseGitRemote(this.remoteUrl);
+    }
+    static parseGitRemote(remoteUrl) {
+        const httpsUrlPattern = new RegExp('^(https?)://(?:.+@)?(.+?)/(.+/.+?)(\\.git)?$', 'i');
+        const httpsMatch = remoteUrl.match(httpsUrlPattern);
+        if (httpsMatch) {
+            return {
+                hostname: httpsMatch[2],
+                protocol: 'HTTPS',
+                repository: httpsMatch[3]
+            };
+        }
+        const sshUrlPattern = new RegExp('^git@(.+?):(.+/.+)\\.git$', 'i');
+        const sshMatch = remoteUrl.match(sshUrlPattern);
+        if (sshMatch) {
+            return {
+                hostname: sshMatch[1],
+                protocol: 'SSH',
+                repository: sshMatch[2]
+            };
+        }
+        // Unauthenticated git protocol for integration tests only
+        const gitUrlPattern = new RegExp('^git://(.+?)/(.+/.+)\\.git$', 'i');
+        const gitMatch = remoteUrl.match(gitUrlPattern);
+        if (gitMatch) {
+            return {
+                hostname: gitMatch[1],
+                protocol: 'GIT',
+                repository: gitMatch[2]
+            };
+        }
+        throw new Error(`The format of '${remoteUrl}' is not a valid GitHub repository URL`);
+    }
+    async savePersistedAuth() {
+        const serverUrl = new url_1.URL(`https://${this.getGitRemote().hostname}`);
+        this.extraheaderConfigKey = `http.${serverUrl.origin}/.extraheader`;
+        // Save and unset persisted extraheader credential in git config if it exists
+        this.persistedExtraheaderConfigValue = await this.getAndUnset();
+    }
+    async restorePersistedAuth() {
+        if (this.persistedExtraheaderConfigValue) {
+            try {
+                await this.setExtraheaderConfig(this.persistedExtraheaderConfigValue);
+                core.info('Persisted git credentials restored');
+            }
+            catch (e) {
+                core.warning(utils.getErrorMessage(e));
+            }
+        }
+    }
+    async configureToken(token) {
+        // Encode and configure the basic credential for HTTPS access
+        const basicCredential = Buffer.from(`x-access-token:${token}`, 'utf8').toString('base64');
+        core.setSecret(basicCredential);
+        const extraheaderConfigValue = `AUTHORIZATION: basic ${basicCredential}`;
+        await this.setExtraheaderConfig(extraheaderConfigValue);
+    }
+    async removeAuth() {
+        await this.getAndUnset();
+    }
+    async setExtraheaderConfig(extraheaderConfigValue) {
+        // Configure a placeholder value. This approach avoids the credential being captured
+        // by process creation audit events, which are commonly logged. For more information,
+        // refer to https://docs.microsoft.com/en-us/windows-server/identity/ad-ds/manage/component-updates/command-line-process-auditing
+        // See https://github.com/actions/checkout/blob/main/src/git-auth-helper.ts#L267-L274
+        await this.git.config(this.extraheaderConfigKey, this.extraheaderConfigPlaceholderValue);
+        // Replace the placeholder
+        await this.gitConfigStringReplace(this.extraheaderConfigPlaceholderValue, extraheaderConfigValue);
+    }
+    async getAndUnset() {
+        let configValue = '';
+        // Save and unset persisted extraheader credential in git config if it exists
+        if (await this.git.configExists(this.extraheaderConfigKey, this.extraheaderConfigValueRegex)) {
+            configValue = await this.git.getConfigValue(this.extraheaderConfigKey, this.extraheaderConfigValueRegex);
+            if (await this.git.tryConfigUnset(this.extraheaderConfigKey, this.extraheaderConfigValueRegex)) {
+                core.info(`Unset config key '${this.extraheaderConfigKey}'`);
+            }
+            else {
+                core.warning(`Failed to unset config key '${this.extraheaderConfigKey}'`);
+            }
+        }
+        return configValue;
+    }
+    async gitConfigStringReplace(find, replace) {
+        if (this.gitConfigPath.length === 0) {
+            const gitDir = await this.git.getGitDirectory();
+            this.gitConfigPath = path.join(this.workingDirectory, gitDir, 'config');
+        }
+        let content = (await fs.promises.readFile(this.gitConfigPath)).toString();
+        const index = content.indexOf(find);
+        if (index < 0 || index != content.lastIndexOf(find)) {
+            throw new Error(`Unable to replace '${find}' in ${this.gitConfigPath}`);
+        }
+        content = content.replace(find, replace);
+        await fs.promises.writeFile(this.gitConfigPath, content);
+    }
+}
+exports.GitConfigHelper = GitConfigHelper;
+
+
+/***/ }),
+
+/***/ 9008:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.GitHubHelper = void 0;
+const core = __importStar(__nccwpck_require__(2186));
+const octokit_client_1 = __nccwpck_require__(5045);
+const utils = __importStar(__nccwpck_require__(6169));
+const ERROR_PR_REVIEW_TOKEN_SCOPE = 'Validation Failed: "Could not resolve to a node with the global id of';
+class GitHubHelper {
+    octokit;
+    constructor(githubServerHostname, token) {
+        const options = {};
+        if (token) {
+            options.auth = `${token}`;
+        }
+        if (githubServerHostname !== 'github.com') {
+            options.baseUrl = `https://${githubServerHostname}/api/v3`;
+        }
+        else {
+            options.baseUrl = 'https://api.github.com';
+        }
+        this.octokit = new octokit_client_1.Octokit(options);
+    }
+    parseRepository(repository) {
+        const [owner, repo] = repository.split('/');
+        return {
+            owner: owner,
+            repo: repo
+        };
+    }
+    async createOrUpdate(inputs, baseRepository, headRepository) {
+        const [headOwner] = headRepository.split('/');
+        const headBranch = `${headOwner}:${inputs.branch}`;
+        // Try to create the pull request
+        try {
+            core.info(`Attempting creation of pull request`);
+            const { data: pull } = await this.octokit.rest.pulls.create({
+                ...this.parseRepository(baseRepository),
+                title: inputs.title,
+                head: headBranch,
+                head_repo: headRepository,
+                base: inputs.base,
+                body: inputs.body,
+                draft: inputs.draft
+            });
+            core.info(`Created pull request #${pull.number} (${headBranch} => ${inputs.base})`);
+            return {
+                number: pull.number,
+                html_url: pull.html_url,
+                created: true
+            };
+        }
+        catch (e) {
+            if (utils.getErrorMessage(e).includes(`A pull request already exists for`)) {
+                core.info(`A pull request already exists for ${headBranch}`);
+            }
+            else {
+                throw e;
+            }
+        }
+        // Update the pull request that exists for this branch and base
+        core.info(`Fetching existing pull request`);
+        const { data: pulls } = await this.octokit.rest.pulls.list({
+            ...this.parseRepository(baseRepository),
+            state: 'open',
+            head: headBranch,
+            base: inputs.base
+        });
+        core.info(`Attempting update of pull request`);
+        const { data: pull } = await this.octokit.rest.pulls.update({
+            ...this.parseRepository(baseRepository),
+            pull_number: pulls[0].number,
+            title: inputs.title,
+            body: inputs.body
+        });
+        core.info(`Updated pull request #${pull.number} (${headBranch} => ${inputs.base})`);
+        return {
+            number: pull.number,
+            html_url: pull.html_url,
+            created: false
+        };
+    }
+    async getRepositoryParent(headRepository) {
+        const { data: headRepo } = await this.octokit.rest.repos.get({
+            ...this.parseRepository(headRepository)
+        });
+        if (!headRepo.parent) {
+            return null;
+        }
+        return headRepo.parent.full_name;
+    }
+    async createOrUpdatePullRequest(inputs, baseRepository, headRepository) {
+        // Create or update the pull request
+        const pull = await this.createOrUpdate(inputs, baseRepository, headRepository);
+        // Apply milestone
+        if (inputs.milestone) {
+            core.info(`Applying milestone '${inputs.milestone}'`);
+            await this.octokit.rest.issues.update({
+                ...this.parseRepository(baseRepository),
+                issue_number: pull.number,
+                milestone: inputs.milestone
+            });
+        }
+        // Apply labels
+        if (inputs.labels.length > 0) {
+            core.info(`Applying labels '${inputs.labels}'`);
+            await this.octokit.rest.issues.addLabels({
+                ...this.parseRepository(baseRepository),
+                issue_number: pull.number,
+                labels: inputs.labels
+            });
+        }
+        // Apply assignees
+        if (inputs.assignees.length > 0) {
+            core.info(`Applying assignees '${inputs.assignees}'`);
+            await this.octokit.rest.issues.addAssignees({
+                ...this.parseRepository(baseRepository),
+                issue_number: pull.number,
+                assignees: inputs.assignees
+            });
+        }
+        // Request reviewers and team reviewers
+        const requestReviewersParams = {};
+        if (inputs.reviewers.length > 0) {
+            requestReviewersParams['reviewers'] = inputs.reviewers;
+            core.info(`Requesting reviewers '${inputs.reviewers}'`);
+        }
+        if (inputs.teamReviewers.length > 0) {
+            const teams = utils.stripOrgPrefixFromTeams(inputs.teamReviewers);
+            requestReviewersParams['team_reviewers'] = teams;
+            core.info(`Requesting team reviewers '${teams}'`);
+        }
+        if (Object.keys(requestReviewersParams).length > 0) {
+            try {
+                await this.octokit.rest.pulls.requestReviewers({
+                    ...this.parseRepository(baseRepository),
+                    pull_number: pull.number,
+                    ...requestReviewersParams
+                });
+            }
+            catch (e) {
+                if (utils.getErrorMessage(e).includes(ERROR_PR_REVIEW_TOKEN_SCOPE)) {
+                    core.error(`Unable to request reviewers. If requesting team reviewers a 'repo' scoped PAT is required.`);
+                }
+                throw e;
+            }
+        }
+        return pull;
+    }
+}
+exports.GitHubHelper = GitHubHelper;
+
+
+/***/ }),
+
+/***/ 5045:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Octokit = void 0;
+const core_1 = __nccwpck_require__(886);
+const plugin_paginate_rest_1 = __nccwpck_require__(4407);
+const plugin_rest_endpoint_methods_1 = __nccwpck_require__(1326);
+const https_proxy_agent_1 = __nccwpck_require__(7219);
+const proxy_from_env_1 = __nccwpck_require__(3329);
+exports.Octokit = core_1.Octokit.plugin(plugin_paginate_rest_1.paginateRest, plugin_rest_endpoint_methods_1.restEndpointMethods, autoProxyAgent);
+// Octokit plugin to support the standard environment variables http_proxy, https_proxy and no_proxy
+function autoProxyAgent(octokit) {
+    octokit.hook.before('request', options => {
+        const proxy = (0, proxy_from_env_1.getProxyForUrl)(options.baseUrl);
+        if (proxy) {
+            options.request.agent = new https_proxy_agent_1.HttpsProxyAgent(proxy);
+        }
+    });
+}
+
+
+/***/ }),
+
+/***/ 6169:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getErrorMessage = exports.readFile = exports.fileExistsSync = exports.parseDisplayNameEmail = exports.randomString = exports.secondsSinceEpoch = exports.getRemoteUrl = exports.getRepoPath = exports.stripOrgPrefixFromTeams = exports.getStringAsArray = exports.getInputAsArray = void 0;
+const core = __importStar(__nccwpck_require__(2186));
+const fs = __importStar(__nccwpck_require__(7147));
+const path = __importStar(__nccwpck_require__(1017));
+function getInputAsArray(name, options) {
+    return getStringAsArray(core.getInput(name, options));
+}
+exports.getInputAsArray = getInputAsArray;
+function getStringAsArray(str) {
+    return str
+        .split(/[\n,]+/)
+        .map(s => s.trim())
+        .filter(x => x !== '');
+}
+exports.getStringAsArray = getStringAsArray;
+function stripOrgPrefixFromTeams(teams) {
+    return teams.map(team => {
+        const slashIndex = team.lastIndexOf('/');
+        if (slashIndex > 0) {
+            return team.substring(slashIndex + 1);
+        }
+        return team;
+    });
+}
+exports.stripOrgPrefixFromTeams = stripOrgPrefixFromTeams;
+function getRepoPath(relativePath) {
+    let githubWorkspacePath = process.env['GITHUB_WORKSPACE'];
+    if (!githubWorkspacePath) {
+        throw new Error('GITHUB_WORKSPACE not defined');
+    }
+    githubWorkspacePath = path.resolve(githubWorkspacePath);
+    core.debug(`githubWorkspacePath: ${githubWorkspacePath}`);
+    let repoPath = githubWorkspacePath;
+    if (relativePath)
+        repoPath = path.resolve(repoPath, relativePath);
+    core.debug(`repoPath: ${repoPath}`);
+    return repoPath;
+}
+exports.getRepoPath = getRepoPath;
+function getRemoteUrl(protocol, hostname, repository) {
+    return protocol == 'HTTPS'
+        ? `https://${hostname}/${repository}`
+        : `git@${hostname}:${repository}.git`;
+}
+exports.getRemoteUrl = getRemoteUrl;
+function secondsSinceEpoch() {
+    const now = new Date();
+    return Math.round(now.getTime() / 1000);
+}
+exports.secondsSinceEpoch = secondsSinceEpoch;
+function randomString() {
+    return Math.random().toString(36).substr(2, 7);
+}
+exports.randomString = randomString;
+function parseDisplayNameEmail(displayNameEmail) {
+    // Parse the name and email address from a string in the following format
+    // Display Name <email@address.com>
+    const pattern = /^([^<]+)\s*<([^>]+)>$/i;
+    // Check we have a match
+    const match = displayNameEmail.match(pattern);
+    if (!match) {
+        throw new Error(`The format of '${displayNameEmail}' is not a valid email address with display name`);
+    }
+    // Check that name and email are not just whitespace
+    const name = match[1].trim();
+    const email = match[2].trim();
+    if (!name || !email) {
+        throw new Error(`The format of '${displayNameEmail}' is not a valid email address with display name`);
+    }
+    return {
+        name: name,
+        email: email
+    };
+}
+exports.parseDisplayNameEmail = parseDisplayNameEmail;
+function fileExistsSync(path) {
+    if (!path) {
+        throw new Error("Arg 'path' must not be empty");
+    }
+    let stats;
+    try {
+        stats = fs.statSync(path);
+    }
+    catch (error) {
+        if (hasErrorCode(error) && error.code === 'ENOENT') {
+            return false;
+        }
+        throw new Error(`Encountered an error when checking whether path '${path}' exists: ${getErrorMessage(error)}`);
+    }
+    if (!stats.isDirectory()) {
+        return true;
+    }
+    return false;
+}
+exports.fileExistsSync = fileExistsSync;
+function readFile(path) {
+    return fs.readFileSync(path, 'utf-8');
+}
+exports.readFile = readFile;
+/* eslint-disable  @typescript-eslint/no-explicit-any */
+function hasErrorCode(error) {
+    return typeof (error && error.code) === 'string';
+}
+function getErrorMessage(error) {
+    if (error instanceof Error)
+        return error.message;
+    return String(error);
+}
+exports.getErrorMessage = getErrorMessage;
 
 
 /***/ }),
@@ -14504,6 +22408,14 @@ module.exports = require("timers");
 
 "use strict";
 module.exports = require("tls");
+
+/***/ }),
+
+/***/ 6224:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("tty");
 
 /***/ }),
 
