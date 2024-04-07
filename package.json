@@ -1,7 +1,7 @@
 {
   "name": "dart-coverage-assistant",
   "description": "Magical code coverage reports for your Flutter and Dart projects",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "author": "whynotmake.it",
   "private": true,
   "homepage": "https://whynotmake.it",
