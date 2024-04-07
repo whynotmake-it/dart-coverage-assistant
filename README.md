@@ -132,9 +132,9 @@ what they do.
 - `enforce_threshold` (optional, default: `'total'`): Whether the action should
   fail if the coverage is below the lower threshold. Can be set to "none",
   "single", or "total".
-- `enforce_forbidden_decrease` (optional, default: `'total'`): Whether the
-  action should fail if the coverage decreases. Can be set to "none", "single",
-  or "total".
+- `enforce_forbidden_decrease` (optional, default: `'none'`): Whether the action
+  should fail if the coverage decreases. Can be set to "none", "single", or
+  "total".
 - `generate_badges` (optional, default: `none`): Whether to generate badges for
   the coverage on "push" workflow triggers. Can be set to "push" (push new
   badges, make sure your branch is not protected), "pr" (open a pull request
