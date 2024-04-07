@@ -4,7 +4,14 @@ import { generateBadges } from './badge'
 import { createComment, findPreviousComment, updateComment } from './comment'
 import { Config } from './config'
 import { findProjects } from './finder'
-import { checkoutRef, getChanges, popStash, stashChanges } from './git'
+import {
+  checkoutRef,
+  commitAndPushChanges,
+  configureGit,
+  getChanges,
+  popStash,
+  stashChanges
+} from './git'
 import { coverProject, parseLcovBefore } from './lcov'
 import { buildMessage } from './message'
 import { verifyCoverageThreshold, verifyNoCoverageDecrease } from './semaphor'
@@ -44,17 +51,24 @@ export async function run(): Promise<void> {
     )
 
     // If we are in a Push event and generateBadges is true, generate badges
-    if (Config.generateBadges && context.eventName === 'push') {
+    if (Config.generateBadges !== 'none' && context.eventName === 'push') {
       try {
-        core.info('Updating and pushing coverage badge...')
+        core.info('Updating coverage badges...')
         await generateBadges(coveredProjects)
 
         const changes = await getChanges()
-        if (changes) {
-          core.info(`Found changes to coverage: ${changes}`)
-          createPr(changes, coveredProjects)
+        if (!changes) {
+          core.info('No changes to coverage badges found to commit.')
         } else {
-          core.info('No changes to commit.')
+          core.info(`Found changes to coverage: ${changes}`)
+          if (Config.generateBadges === 'pr') {
+            core.info('Creating PR to update coverage badges...')
+            createPr(changes, coveredProjects)
+          } else if (Config.generateBadges === 'push') {
+            core.info('Committing and pushing changes to coverage badges...')
+            await configureGit()
+            await commitAndPushChanges('chore: coverage badges [skip ci]')
+          }
         }
       } catch (error) {
         core.warning(

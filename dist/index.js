@@ -20672,17 +20672,25 @@ async function run() {
         const coveredProjects = projectsWithCoverage.filter(p => p.coverage?.length);
         core.info(`${coveredProjects.filter(p => p.coverage).length} projects covered.`);
         // If we are in a Push event and generateBadges is true, generate badges
-        if (config_1.Config.generateBadges && github_1.context.eventName === 'push') {
+        if (config_1.Config.generateBadges !== 'none' && github_1.context.eventName === 'push') {
             try {
-                core.info('Updating and pushing coverage badge...');
+                core.info('Updating coverage badges...');
                 await (0, badge_1.generateBadges)(coveredProjects);
                 const changes = await (0, git_1.getChanges)();
-                if (changes) {
-                    core.info(`Found changes to coverage: ${changes}`);
-                    (0, pull_request_1.createPr)(changes, coveredProjects);
+                if (!changes) {
+                    core.info('No changes to coverage badges found to commit.');
                 }
                 else {
-                    core.info('No changes to commit.');
+                    core.info(`Found changes to coverage: ${changes}`);
+                    if (config_1.Config.generateBadges === 'pr') {
+                        core.info('Creating PR to update coverage badges...');
+                        (0, pull_request_1.createPr)(changes, coveredProjects);
+                    }
+                    else if (config_1.Config.generateBadges === 'push') {
+                        core.info('Committing and pushing changes to coverage badges...');
+                        await (0, git_1.configureGit)();
+                        await (0, git_1.commitAndPushChanges)('chore: coverage badges [skip ci]');
+                    }
                 }
             }
             catch (error) {
