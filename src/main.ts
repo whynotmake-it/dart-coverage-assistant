@@ -80,11 +80,7 @@ export async function run(): Promise<void> {
     const pr = context.payload.pull_request
     if (pr) {
       core.info(`Building message...`)
-      const message = buildMessage(
-        coveredProjects,
-        pr.html_url ?? '',
-        pr.head.sha
-      )
+      const message = buildMessage(coveredProjects, pr.head.sha)
 
       core.setOutput('message', message)
       try {

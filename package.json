@@ -1,16 +1,16 @@
 {
   "name": "dart-coverage-assistant",
   "description": "Magical code coverage reports for your Flutter and Dart projects",
-  "version": "0.0.0",
-  "author": "",
+  "version": "0.0.1",
+  "author": "whynotmake.it",
   "private": true,
-  "homepage": "https://github.com/actions/typescript-action",
+  "homepage": "https://whynotmake.it",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/actions/typescript-action.git"
+    "url": "git+https://github.com/whynotmake-it/dart-coverage-assistant"
   },
   "bugs": {
-    "url": "https://github.com/actions/typescript-action/issues"
+    "url": "https://github.com/whynotmake-it/dart-coverage-assistant/issues"
   },
   "keywords": [
     "actions",
