@@ -40,12 +40,11 @@ export function createPr(
 function buildPrMessage(coveredProjects: CoveredProject[]): string {
   // Get current commit from push event
   const sha = context.sha
-  const url = context.payload.repository?.html_url
 
   let md = ''
-  md += '# Update Coverage\n'
+  md += '# Update Coverage Badges\n'
   md += '\n'
-  md += `Commit (${sha})[${url}] changed the coverage for this repository.\n`
-  md += 'This PR updates all files in accordance.\n'
+  md += `Commit ${sha} changed the coverage for this repository.\n`
+  md += 'This PR updates all badges in accordance.\n'
   return md
 }

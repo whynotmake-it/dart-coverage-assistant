@@ -37,8 +37,8 @@ inputs:
     default: "none"
     required: false
   generate_badges:
-    description: "Whether to generate badges for the coverage on 'push' workflow triggers. Defaults to true."
-    default: "true"
+    description: 'Whether to generate badges for the coverage on "push" workflow triggers. Can be set to "push" (push new badges, make sure your branch is not protected), "pr" (open a pull request with the changes, make sure you allow Actions to open PRs on your Repo), or "none" (no badge generation). Defaults to none.'
+    default: "false"
     required: false
 
 # Define your outputs here.
