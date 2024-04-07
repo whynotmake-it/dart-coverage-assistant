@@ -3,7 +3,7 @@
 A no-brainer tool to generate coverage reports for your Dart projects. Plug and
 play, both for your existing CI, or in a new project.
 
-[![Empowered by whynotmake.it][wnmi_badge]](whynotmake.it)
+[![Empowered by whynotmake.it][wnmi_badge]](https://whynotmake.it)
 [![License: MIT][mit_badge]](./LICENSE) ![Test coverage](./badges/coverage.svg)
 
 ## Features
@@ -143,8 +143,8 @@ what they do.
 
 ## Honorable mentions
 
-- Big thanks to @JohannSchramm for his help and being an inspiration for this
-  project.
+- Big thanks to [@JohannSchramm](https://github.com/JohannSchramm) for his help
+  and being an inspiration for this project.
 
 [mit_badge]:
   https://img.shields.io/github/license/artiomtr/jest-coverage-report-action
