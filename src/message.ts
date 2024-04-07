@@ -47,7 +47,7 @@ function buildTotalTable(projects: CoveredProject[]): string {
     md += `## Monorepo coverage\n`
     md += `This repository contains ${projects.length} Dart projects. This is is the total coverage across all of them:\n`
     md += '\n'
-    md += `${badge}\t${buildDiffString(getTotalDiff(projects))}\n`
+    md += `${badge}    ${buildDiffString(getTotalDiff(projects))}\n`
   }
   return md
 }
@@ -76,7 +76,7 @@ function buildHeader(project: CoveredProject): string {
   let md = `## \`${project.name}\`\n`
   md += `${project.description}\n`
   md += '\n'
-  md += `${badgeCell}\t${diff}\n`
+  md += `${badgeCell}    ${diff}\n`
   return md
 }
 
