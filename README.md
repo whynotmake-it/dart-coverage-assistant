@@ -35,6 +35,8 @@ play, both for your existing CI, or in a new project.
 - Show off your coverage in your README or on your website, without signing up
   to a third party service
 - Generate badges on `push` events
+- Can be configured to either push new badges to the current branch, or open a
+  PR with them.
 
 ## Get Started
 
@@ -61,10 +63,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           lower_threshold: 50
           upper_threshold: 90
+          generate_badges: pr
 ```
 
-> [!IMPORTANT] 
-> With this setup, this action will assume, that your projects have
+> [!IMPORTANT] With this setup, this action will assume, that your projects have
 > up-to-date coverage. This can be achieved by either running the tests like
 > `flutter test --coverage` in the steps before this action, or always running
 > them locally. Check the section below for more information about configuration
@@ -113,6 +115,7 @@ jobs:
           testing_command: flutter test --coverage
           lower_threshold: 50
           upper_threshold: 90
+          generate_badges: pr
 ```
 
 ## Configuration
@@ -132,8 +135,11 @@ what they do.
 - `enforce_forbidden_decrease` (optional, default: `'total'`): Whether the
   action should fail if the coverage decreases. Can be set to "none", "single",
   or "total".
-- `generate_badges` (optional, default: `true`): Whether to generate badges for
-  the coverage on 'push' workflow triggers.
+- `generate_badges` (optional, default: `none`): Whether to generate badges for
+  the coverage on "push" workflow triggers. Can be set to "push" (push new
+  badges, make sure your branch is not protected), "pr" (open a pull request
+  with the changes, make sure you allow Actions to open PRs on your Repo), or
+  "none" (no badge generation).
 
 ## Honorable mentions
 

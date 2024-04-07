@@ -31,6 +31,8 @@ jobs:
       - name: Checkout
         id: checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Initialize CodeQL
         id: initialize

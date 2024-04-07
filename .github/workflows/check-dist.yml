@@ -32,6 +32,8 @@ jobs:
       - name: Checkout
         id: checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -51,7 +53,9 @@ jobs:
         id: diff
         run: |
           if [ "$(git diff --ignore-space-at-eol --text dist/ | wc -l)" -gt "0" ]; then
-            echo "Detected uncommitted changes after build. See status below:"
+            echo "Detected uncommitted changes after build."
+            echo "Make sure you have updated all submodules and have run 'npm run bundle'."
+            echo "See status below:"
             git diff --ignore-space-at-eol --text dist/
             exit 1
           fi
