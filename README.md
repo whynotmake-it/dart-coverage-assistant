@@ -123,10 +123,10 @@ jobs:
 Below you will find a short list of all available configuration options, and
 what they do.
 
-- `lower_threshold` (optional, default: `100`): The lower threshold for code
+- `lower_threshold` (optional, default: `0`): The lower threshold for code
   coverage, anything below this is considered a failure.
-- `upper_threshold` (optional, default: `100`): The threshold for the coverage
-  to be considered 'good', anything below this is considered critical.
+- `upper_threshold` (optional, default: `0`): The threshold for the coverage to
+  be considered 'good', anything below this is considered critical.
 - `compare_against_base` (optional, default: `true`): Whether to compare against
   the base when running in a PR.
 - `enforce_threshold` (optional, default: `'total'`): Whether the action should
