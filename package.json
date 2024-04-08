@@ -71,7 +71,7 @@
     "@actions/exec": "^1.1.1",
     "@actions/github": "^5.1.1",
     "@actions/glob": "^0.4.0",
-    "@octokit/graphql-schema": "^14.41.0",
+    "@octokit/graphql-schema": "^15.4.2",
     "@types/lcov-parse": "^1.0.2",
     "create-pull-request": "file:submodules/create-pull-request",
     "lcov-parse": "^1.0.0",
