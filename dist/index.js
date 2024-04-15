@@ -20447,25 +20447,23 @@ function getProjectLineCoverageBefore(project) {
 }
 exports.getProjectLineCoverageBefore = getProjectLineCoverageBefore;
 function getTotalPercentage(projects) {
-    return getLineCoverage(getProjectCoverage(projects, 'coverage'));
+    return getLineCoverage(getSectionSummaries(projects, 'coverage'));
 }
 exports.getTotalPercentage = getTotalPercentage;
 function getTotalPercentageBefore(projects) {
-    return getLineCoverage(getProjectCoverage(projects, 'coverageBefore'));
+    return getLineCoverage(getSectionSummaries(projects, 'coverageBefore'));
 }
 exports.getTotalPercentageBefore = getTotalPercentageBefore;
-function getProjectCoverage(projects, coverageKey) {
-    const coverages = [];
+function getSectionSummaries(projects, coverageKey) {
+    let summaries = [];
     for (const project of projects) {
-        const coverage = project[coverageKey];
-        if (!coverage) {
+        const sectionSummaries = project[coverageKey];
+        if (!sectionSummaries) {
             continue;
         }
-        for (const sections of coverage) {
-            coverages.push(sections);
-        }
+        summaries = summaries.concat(sectionSummaries);
     }
-    return coverages;
+    return summaries;
 }
 
 
