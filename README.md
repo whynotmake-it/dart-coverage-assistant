@@ -3,7 +3,7 @@
 A no-brainer tool to generate coverage reports for your Dart projects. Plug and
 play, both for your existing CI, or in a new project.
 
-[![Empowered by whynotmake.it][wnmi_badge]](whynotmake.it)
+[![Empowered by whynotmake.it][wnmi_badge]](https://whynotmake.it)
 [![License: MIT][mit_badge]](./LICENSE) ![Test coverage](./badges/coverage.svg)
 
 ## Features
@@ -35,6 +35,8 @@ play, both for your existing CI, or in a new project.
 - Show off your coverage in your README or on your website, without signing up
   to a third party service
 - Generate badges on `push` events
+- Can be configured to either push new badges to the current branch, or open a
+  PR with them.
 
 ## Get Started
 
@@ -61,10 +63,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           lower_threshold: 50
           upper_threshold: 90
+          generate_badges: pr
 ```
 
-> [!IMPORTANT] 
-> With this setup, this action will assume, that your projects have
+> [!IMPORTANT] With this setup, this action will assume, that your projects have
 > up-to-date coverage. This can be achieved by either running the tests like
 > `flutter test --coverage` in the steps before this action, or always running
 > them locally. Check the section below for more information about configuration
@@ -113,6 +115,7 @@ jobs:
           testing_command: flutter test --coverage
           lower_threshold: 50
           upper_threshold: 90
+          generate_badges: pr
 ```
 
 ## Configuration
@@ -120,25 +123,28 @@ jobs:
 Below you will find a short list of all available configuration options, and
 what they do.
 
-- `lower_threshold` (optional, default: `100`): The lower threshold for code
+- `lower_threshold` (optional, default: `0`): The lower threshold for code
   coverage, anything below this is considered a failure.
-- `upper_threshold` (optional, default: `100`): The threshold for the coverage
-  to be considered 'good', anything below this is considered critical.
+- `upper_threshold` (optional, default: `0`): The threshold for the coverage to
+  be considered 'good', anything below this is considered critical.
 - `compare_against_base` (optional, default: `true`): Whether to compare against
   the base when running in a PR.
 - `enforce_threshold` (optional, default: `'total'`): Whether the action should
   fail if the coverage is below the lower threshold. Can be set to "none",
   "single", or "total".
-- `enforce_forbidden_decrease` (optional, default: `'total'`): Whether the
-  action should fail if the coverage decreases. Can be set to "none", "single",
-  or "total".
-- `generate_badges` (optional, default: `true`): Whether to generate badges for
-  the coverage on 'push' workflow triggers.
+- `enforce_forbidden_decrease` (optional, default: `'none'`): Whether the action
+  should fail if the coverage decreases. Can be set to "none", "single", or
+  "total".
+- `generate_badges` (optional, default: `none`): Whether to generate badges for
+  the coverage on "push" workflow triggers. Can be set to "push" (push new
+  badges, make sure your branch is not protected), "pr" (open a pull request
+  with the changes, make sure you allow Actions to open PRs on your Repo), or
+  "none" (no badge generation).
 
 ## Honorable mentions
 
-- Big thanks to @JohannSchramm for his help and being an inspiration for this
-  project.
+- Big thanks to [@JohannSchramm](https://github.com/JohannSchramm) for his help
+  and being an inspiration for this project.
 
 [mit_badge]:
   https://img.shields.io/github/license/artiomtr/jest-coverage-report-action

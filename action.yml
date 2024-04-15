@@ -2,6 +2,10 @@ name: "Dart Coverage Assistant"
 description: "Magically generates code coverage for all your dart projects."
 author: "whynotmake.it"
 
+branding:
+  icon: "bar-chart"
+  color: "green"
+
 # Define your inputs here.
 inputs:
   GITHUB_TOKEN:
@@ -13,12 +17,12 @@ inputs:
     default: "${{ github.head_ref }}"
     required: false
   lower_threshold:
-    description: "The lower threshold for code coverage, anything below this is considered a failure. Defaults to 100"
-    default: "100"
+    description: "The lower threshold for code coverage, anything below this is considered a failure. Defaults to 0."
+    default: "0"
     required: false
   upper_threshold:
-    description: "The threshold for the coverage to be considered 'good', anything below this is considered critical. Defaults to 100"
-    default: "100"
+    description: "The threshold for the coverage to be considered 'good', anything below this is considered critical. Defaults to 0, we are proud of all coverage here!"
+    default: "0"
     required: false
   compare_against_base:
     description: "Whether to compare against the base when running in a PR. Defaults to true."
@@ -33,8 +37,8 @@ inputs:
     default: "none"
     required: false
   generate_badges:
-    description: "Whether to generate badges for the coverage on 'push' workflow triggers. Defaults to true."
-    default: "true"
+    description: 'Whether to generate badges for the coverage on "push" workflow triggers. Can be set to "push" (push new badges, make sure your branch is not protected), "pr" (open a pull request with the changes, make sure you allow Actions to open PRs on your Repo), or "none" (no badge generation). Defaults to none.'
+    default: "false"
     required: false
 
 # Define your outputs here.

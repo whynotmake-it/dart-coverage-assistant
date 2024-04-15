@@ -38,3 +38,19 @@ export async function commitAndPushChanges(
   await exec.exec('git', ['commit', '-am', commitMessage])
   await exec.exec('git', ['push', 'origin'])
 }
+
+/**
+ *
+ * @returns the changes in the current branch as a string
+ */
+export async function getChanges(): Promise<string> {
+  let changes = ''
+  await exec.exec('git', ['diff', '--name-only'], {
+    listeners: {
+      stdout: (data: Buffer) => {
+        changes += data.toString()
+      }
+    }
+  })
+  return changes
+}
