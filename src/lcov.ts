@@ -114,29 +114,27 @@ export function getProjectLineCoverageBefore(
 export function getTotalPercentage(
   projects: CoveredProject[]
 ): LineCoverage | undefined {
-  return getLineCoverage(getProjectCoverage(projects, 'coverage'))
+  return getLineCoverage(getSectionSummaries(projects, 'coverage'))
 }
 
 export function getTotalPercentageBefore(
   projects: CoveredProject[]
 ): LineCoverage {
-  return getLineCoverage(getProjectCoverage(projects, 'coverageBefore'))
+  return getLineCoverage(getSectionSummaries(projects, 'coverageBefore'))
 }
 
-function getProjectCoverage(
+function getSectionSummaries(
   projects: CoveredProject[],
   coverageKey: keyof Pick<CoveredProject, 'coverage' | 'coverageBefore'>
 ): SectionSummary[] {
-  const coverages: SectionSummary[] = []
+  let summaries: SectionSummary[] = []
   for (const project of projects) {
-    const coverage = project[coverageKey]
-    if (!coverage) {
+    const sectionSummaries = project[coverageKey]
+    if (!sectionSummaries) {
       continue
     }
-    for (const sections of coverage) {
-      coverages.push(sections)
-    }
+    summaries = summaries.concat(sectionSummaries)
   }
 
-  return coverages
+  return summaries
 }
