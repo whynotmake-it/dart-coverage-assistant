@@ -10522,139 +10522,6 @@ exports.isPlainObject = isPlainObject;
 
 /***/ }),
 
-/***/ 7454:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-/*
-Copyright (c) 2012, Yahoo! Inc. All rights reserved.
-Code licensed under the BSD License:
-http://yuilibrary.com/license/
-*/
-
-var fs = __nccwpck_require__(7147),
-    path = __nccwpck_require__(1017);
-
-/* istanbul ignore next */
-var exists = fs.exists || path.exists;
-
-var walkFile = function(str, cb) {
-    var data = [], item;
-
-    [ 'end_of_record' ].concat(str.split('\n')).forEach(function(line) {
-        line = line.trim();
-        var allparts = line.split(':'),
-            parts = [allparts.shift(), allparts.join(':')],
-            lines, fn;
-
-        switch (parts[0].toUpperCase()) {
-            case 'TN':
-                item.title = parts[1].trim();
-                break;
-            case 'SF':
-                item.file = parts.slice(1).join(':').trim();
-                break;
-            case 'FNF':
-                item.functions.found = Number(parts[1].trim());
-                break;
-            case 'FNH':
-                item.functions.hit = Number(parts[1].trim());
-                break;
-            case 'LF':
-                item.lines.found = Number(parts[1].trim());
-                break;
-            case 'LH':
-                item.lines.hit = Number(parts[1].trim());
-                break;
-            case 'DA':
-                lines = parts[1].split(',');
-                item.lines.details.push({
-                    line: Number(lines[0]),
-                    hit: Number(lines[1])
-                });
-                break;
-            case 'FN':
-                fn = parts[1].split(',');
-                item.functions.details.push({
-                    name: fn[1],
-                    line: Number(fn[0])
-                });
-                break;
-            case 'FNDA':
-                fn = parts[1].split(',');
-                item.functions.details.some(function(i, k) {
-                    if (i.name === fn[1] && i.hit === undefined) {
-                        item.functions.details[k].hit = Number(fn[0]);
-                        return true;
-                    }
-                });
-                break;
-            case 'BRDA':
-                fn = parts[1].split(',');
-                item.branches.details.push({
-                    line: Number(fn[0]),
-                    block: Number(fn[1]),
-                    branch: Number(fn[2]),
-                    taken: ((fn[3] === '-') ? 0 : Number(fn[3]))
-                });
-                break;
-            case 'BRF':
-                item.branches.found = Number(parts[1]);
-                break;
-            case 'BRH':
-                item.branches.hit = Number(parts[1]);
-                break;
-        }
-
-        if (line.indexOf('end_of_record') > -1) {
-            data.push(item);
-            item = {
-              lines: {
-                  found: 0,
-                  hit: 0,
-                  details: []
-              },
-              functions: {
-                  hit: 0,
-                  found: 0,
-                  details: []
-              },
-              branches: {
-                hit: 0,
-                found: 0,
-                details: []
-              }
-            };
-        }
-    });
-
-    data.shift();
-
-    if (data.length) {
-        cb(null, data);
-    } else {
-        cb('Failed to parse string');
-    }
-};
-
-var parse = function(file, cb) {
-    exists(file, function(x) {
-        if (!x) {
-            return walkFile(file, cb);
-        }
-        fs.readFile(file, 'utf8', function(err, str) {
-            walkFile(str, cb);
-        });
-    });
-
-};
-
-
-module.exports = parse;
-module.exports.source = walkFile;
-
-
-/***/ }),
-
 /***/ 3973:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -20504,7 +20371,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getTotalPercentageBefore = exports.getTotalPercentage = exports.getProjectLineCoverageBefore = exports.getProjectLineCoverage = exports.getLineCoverage = exports.parseLcovBefore = exports.coverProject = void 0;
-const lcov_parse_1 = __importDefault(__nccwpck_require__(7454));
+const node_fs_1 = __nccwpck_require__(7561);
+const lcov_parser_1 = __importDefault(__nccwpck_require__(6292));
 /**
  * Converts a project into a CoveredProject object by attempting to parse the coverage file
  * @param project the project for which the coverage should be calculated
@@ -20538,21 +20406,14 @@ async function parseLcov(project) {
     if (!file) {
         return undefined;
     }
-    return new Promise((resolve, reject) => {
-        (0, lcov_parse_1.default)(file, (err, data) => {
-            if (err) {
-                reject(err);
-            }
-            resolve(data);
-        });
-    });
+    return (0, lcov_parser_1.default)({ from: (0, node_fs_1.createReadStream)(file) });
 }
 function getLineCoverage(lcov) {
     let hit = 0;
     let found = 0;
     for (const entry of lcov) {
         hit += entry.lines.hit;
-        found += entry.lines.found;
+        found += entry.lines.instrumented;
     }
     if (!found) {
         return {
@@ -20586,21 +20447,24 @@ function getProjectLineCoverageBefore(project) {
 }
 exports.getProjectLineCoverageBefore = getProjectLineCoverageBefore;
 function getTotalPercentage(projects) {
-    const coverages = projects
-        .map(p => p.coverage)
-        .flat()
-        .filter(c => c !== undefined && c !== null);
-    return getLineCoverage(coverages);
+    return getLineCoverage(getSectionSummaries(projects, 'coverage'));
 }
 exports.getTotalPercentage = getTotalPercentage;
 function getTotalPercentageBefore(projects) {
-    const coverages = projects
-        .map(p => p.coverageBefore)
-        .flat()
-        .filter(c => c !== undefined && c !== null);
-    return getLineCoverage(coverages);
+    return getLineCoverage(getSectionSummaries(projects, 'coverageBefore'));
 }
 exports.getTotalPercentageBefore = getTotalPercentageBefore;
+function getSectionSummaries(projects, coverageKey) {
+    let summaries = [];
+    for (const project of projects) {
+        const sectionSummaries = project[coverageKey];
+        if (!sectionSummaries) {
+            continue;
+        }
+        summaries = summaries.concat(sectionSummaries);
+    }
+    return summaries;
+}
 
 
 /***/ }),
@@ -20820,7 +20684,7 @@ function buildBody(project) {
     // Group files by folder
     for (const file of project.coverage) {
         const pubspecPath = project.pubspecFile.split('/').slice(0, -1).join('/');
-        const folder = file.file
+        const folder = file.path
             .split('/')
             .slice(0, -1)
             .join('/')
@@ -20832,7 +20696,7 @@ function buildBody(project) {
     for (const folder of Object.keys(folders).sort()) {
         tableMd += `| **${folder}** |   |   |\n`;
         for (const file of folders[folder]) {
-            const name = file.file.split('/').slice(-1)[0];
+            const name = file.path.split('/').slice(-1)[0];
             tableMd += `| ${name} | ${(0, lcov_1.getLineCoverage)([file]).percentage.toFixed(2)} | ${file.lines.details.length} |\n`;
         }
     }
@@ -22393,6 +22257,22 @@ module.exports = require("net");
 
 /***/ }),
 
+/***/ 7561:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:fs");
+
+/***/ }),
+
+/***/ 4492:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:stream");
+
+/***/ }),
+
 /***/ 2037:
 /***/ ((module) => {
 
@@ -22478,6 +22358,60 @@ module.exports = require("util");
 
 "use strict";
 module.exports = require("zlib");
+
+/***/ }),
+
+/***/ 4996:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+Object.defineProperty(exports,Symbol.toStringTag,{value:"Module"});function fieldNames(){return{branchHit:"BRH",branchInstrumented:"BRF",branchLocation:"BRDA",comment:"#",endOfRecord:"end_of_record",filePath:"SF",functionExecution:"FNDA",functionHit:"FNH",functionInstrumented:"FNF",functionLocation:"FN",lineHit:"LH",lineInstrumented:"LF",lineLocation:"DA",testName:"TN",version:"VER"}}var Variant=(n=>(n[n.None=0]="None",n[n.BranchHit=1]="BranchHit",n[n.BranchInstrumented=2]="BranchInstrumented",n[n.BranchLocation=3]="BranchLocation",n[n.Comment=4]="Comment",n[n.EndOfRecord=5]="EndOfRecord",n[n.FilePath=6]="FilePath",n[n.FunctionExecution=7]="FunctionExecution",n[n.FunctionHit=8]="FunctionHit",n[n.FunctionInstrumented=9]="FunctionInstrumented",n[n.FunctionLocation=10]="FunctionLocation",n[n.LineHit=11]="LineHit",n[n.LineInstrumented=12]="LineInstrumented",n[n.LineLocation=13]="LineLocation",n[n.TestName=14]="TestName",n[n.Version=15]="Version",n))(Variant||{});const defaultFieldNames=Object.freeze(fieldNames());exports.Variant=Variant;exports.defaultFieldNames=defaultFieldNames;
+
+
+/***/ }),
+
+/***/ 6292:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+Object.defineProperties(exports,{__esModule:{value:!0},[Symbol.toStringTag]:{value:"Module"}});const promise_index=__nccwpck_require__(9543);__nccwpck_require__(4492);__nccwpck_require__(4996);__nccwpck_require__(5403);__nccwpck_require__(4072);__nccwpck_require__(205);exports["default"]=promise_index.lcovParser;exports.lcovParser=promise_index.lcovParser;
+
+
+/***/ }),
+
+/***/ 4072:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+Object.defineProperty(exports,Symbol.toStringTag,{value:"Module"});const constants=__nccwpck_require__(4996);function isEmptyField(t){return t===constants.Variant.EndOfRecord||t===constants.Variant.None}function isNonEmptyField(t){return!isEmptyField(t)}exports.isEmptyField=isEmptyField;exports.isNonEmptyField=isNonEmptyField;
+
+
+/***/ }),
+
+/***/ 5403:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+Object.defineProperty(exports,Symbol.toStringTag,{value:"Module"});const constants=__nccwpck_require__(4996),lib_fieldVariant=__nccwpck_require__(4072);let t$1=class{_head=null;_tail=null;_size=0;insert(e){const n=this._tail,r={next:null,value:e};n!==null&&(n.next=r),this._head===null&&(this._head=r),this._tail=r,this._size++}remove(){const e=this._head;return e!==null?(this._head=e.next,this._size--,this._tail===e&&(this._tail=null),e.value):null}peek(){return this._head!==null?this._head.value:null}size(){return this._size}};class t{constructor(e){this._buffer=e,this.size=e.length}size;_offset=0;compare(e){return this._offset>=this.size&&(this._offset=0),this._buffer[this._offset]===e?(this._offset++,!0):!1}matched(){return this._offset===this.size}reset(){this._offset=0}}function encode(a){const e=a.length,n=[];for(let r=0;r<e;r++){let s=a.charCodeAt(r);s<128?n.push(s):s<2048?n.push(s>>6|192,s&63|128):(s&64512)===55296&&r+1<e&&(a.charCodeAt(r+1)&64512)===56320?(s=65536+((s&1023)<<10)+(a.charCodeAt(++r)&1023),n.push(s>>18|240,s>>12&63|128,s>>6&63|128,s&63|128)):n.push(s>>12|224,s>>6&63|128,s&63|128)}return n}function generateFieldLookup(a){const e=Object.keys(a),n=mapFieldNames(e),r=Array(n.length);for(let s=0;s<n.length;s++)r[s]=new t(encode(a[e[s]]));return sortFieldNames(n,r)}function mapFieldNames(a){const e=Array(a.length);for(let n=0;n<a.length;n++)e[n]=mapFieldName(a[n]);return e}function sortFieldNames(a,e){const n=new Map,r=e.slice().sort((i,u)=>i.size>u.size?-1:1),s=Array(a.length);for(let i=0;i<r.length;i++)n.set(r[i],i);for(let i=0;i<a.length;i++)s[n.get(e[i])]=a[i];return[s,r]}function mapFieldName(a){switch(a){case"branchHit":return constants.Variant.BranchHit;case"branchInstrumented":return constants.Variant.BranchInstrumented;case"branchLocation":return constants.Variant.BranchLocation;case"comment":return constants.Variant.Comment;case"endOfRecord":return constants.Variant.EndOfRecord;case"filePath":return constants.Variant.FilePath;case"functionExecution":return constants.Variant.FunctionExecution;case"functionHit":return constants.Variant.FunctionHit;case"functionInstrumented":return constants.Variant.FunctionInstrumented;case"functionLocation":return constants.Variant.FunctionLocation;case"lineHit":return constants.Variant.LineHit;case"lineInstrumented":return constants.Variant.LineInstrumented;case"lineLocation":return constants.Variant.LineLocation;case"testName":return constants.Variant.TestName;case"version":return constants.Variant.Version}}class LcovParser{_buffer=null;_offset=0;_chunks=new t$1;_variants;_fieldNames;constructor(e){const[n,r]=generateFieldLookup(e);this._variants=n,this._fieldNames=r}write(e){this._chunks.insert(e)}read(){if(this._buffer===null){if(this._chunks.size()===0)return LcovParser._defaultResult(!0,!1);this._buffer=this._chunks.remove()}else if(this._offset>=this._buffer.byteLength){if(this._chunks.size()===0)return LcovParser._defaultResult(!0,!1);this._buffer=this._chunks.remove(),this._offset=0}let e=this._parseResult(this._buffer);for(;e.incomplete&&this._chunks.size()!==0;)this._buffer=Buffer.concat([this._buffer.subarray(this._offset),this._chunks.remove()]),this._offset=0,e=this._parseResult(this._buffer);return e}flush(){let e=this.read();const n=[e];for(;!e.done&&!e.incomplete;)e=this.read(),n.push(e);return n}getCurrentBuffer(){return this._buffer&&this._offset<this._buffer.byteLength?this._buffer.subarray(this._offset):null}_parseResult(e){const n=e.byteLength;for(let r=this._offset;r<n;r++){const s=this._matchFields(e,r,n);if(s!==null)return s}return this._resetMatcher(),LcovParser._defaultResult(!1,!0)}_matchFields(e,n,r){const s=e[n];for(let i=0;i<this._fieldNames.length;i++){const u=this._fieldNames[i];if(u.compare(s)&&u.matched()){const l=this._variants[i],o=lib_fieldVariant.isNonEmptyField(l),f=l===constants.Variant.Comment;if(o&&!f&&n+1<r&&e[n+1]!==58)continue;const h=o?LcovParser._parseValue(e,n+1,f):null;let c=null;if(h!==null)this._offset=h.lastIndex+1,c=h.value;else if(!o){const _=LcovParser._seekNextLine(e,n+1);if(_!==-1)this._offset=_+1;else return LcovParser._defaultResult(!1,!0)}return this._resetMatcher(),{done:!1,incomplete:o&&h===null,value:c,variant:l}}}return null}_resetMatcher(){for(const e of this._fieldNames)e.reset()}static _parseValue(e,n,r){const s=e.byteLength;let i=r?n:-1;for(let u=n;u<s;u++){const l=e[u];if(!r&&l===58)i=u+1;else if(l===10)return i===-1?null:{lastIndex:u,value:LcovParser._parseSlice(e,i,u)}}return null}static _seekNextLine(e,n){const r=e.byteLength;for(let s=n;s<r;s++)if(e[s]===10)return s;return-1}static _parseSlice(e,n,r){const s=[];let i=n;for(let u=n;u<r;u++)e[u]===44&&(s.push(e.subarray(i,u).toString()),i=u+1);return s.push(e.subarray(i,r).toString()),s}static _defaultResult(e,n){return{done:e,incomplete:n,value:null,variant:constants.Variant.None}}}exports.LcovParser=LcovParser;
+
+
+/***/ }),
+
+/***/ 9543:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+Object.defineProperties(exports,{__esModule:{value:!0},[Symbol.toStringTag]:{value:"Module"}});const node_stream=__nccwpck_require__(4492),constants=__nccwpck_require__(4996),parser=__nccwpck_require__(5403),transformResult=__nccwpck_require__(205);__nccwpck_require__(4072);function transformSynchronous(o){const r=new Map,e=[];let s=0;for(const t of o){const n=transformResult.l(t);n.variant!==constants.Variant.None&&(s=transformResult.updateResults(s,n,r,e))}return e}function transformAsynchronous(o,r){const e=new Map,s=[];let t=0;return new Promise((n,i)=>{function u(f){if(typeof f=="string")o.write(Buffer.from(f));else if(Buffer.isBuffer(f))o.write(f);else{a(),i(new Error("received unsupported chunk type."));return}for(const p of o.flush()){const d=transformResult.l(p);d.variant!==constants.Variant.None&&(t=transformResult.updateResults(t,d,e,s))}}function c(){a(),n(s)}function l(f){a(),i(f)}function a(){r.off("data",u),r.off("error",l),r.off("end",c)}r.on("data",u),r.once("error",l),r.once("end",c)})}function lcovParser(o){const{fieldNames:r,from:e,parser:s}=o,t=s??new parser.LcovParser(r??constants.defaultFieldNames);return e instanceof node_stream.Readable?transformAsynchronous(t,e):typeof e=="string"||e instanceof ArrayBuffer?(t.write(Buffer.from(e)),new Promise(n=>{n(transformSynchronous(t.flush()))})):Buffer.isBuffer(e)?(t.write(e),new Promise(n=>{n(transformSynchronous(t.flush()))})):Promise.reject(new Error("given `from` type isn't supported."))}exports["default"]=lcovParser;exports.lcovParser=lcovParser;
+
+
+/***/ }),
+
+/***/ 205:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+const constants=__nccwpck_require__(4996);function handleResult(e,a,t){switch(e.variant){case constants.Variant.TestName:a.clear(),t.name=e.name;break;case constants.Variant.FilePath:t.path=e.path;break;case constants.Variant.EndOfRecord:return a.clear(),!0;case constants.Variant.FunctionLocation:case constants.Variant.FunctionExecution:createUpdateFunctionSummary(a,t.functions.details,e);break;case constants.Variant.BranchLocation:t.branches.details.push(createBranchSummary(e));break;case constants.Variant.LineLocation:t.lines.details.push(createLineSummary(e));break;case constants.Variant.BranchInstrumented:case constants.Variant.BranchHit:updateSectionSummary(t.branches,e);break;case constants.Variant.FunctionInstrumented:case constants.Variant.FunctionHit:updateSectionSummary(t.functions,e);break;case constants.Variant.LineInstrumented:case constants.Variant.LineHit:updateSectionSummary(t.lines,e);break}return!1}function updateResults(e,a,t,n){return e===n.length&&(n[e]=createSection()),handleResult(a,t,n[e])?e+1:e}function createSection(e){return{branches:{details:[],hit:0,instrumented:0},functions:{details:[],hit:0,instrumented:0},lines:{details:[],hit:0,instrumented:0},name:e?e.name:"",path:""}}function createUpdateFunctionSummary(e,a,t){const n=e.get(t.name);if(n===void 0){const r=createFunctionSummary(t);e.set(t.name,r),a.push(r)}else t.variant===constants.Variant.FunctionExecution?n.hit+=t.hit:n.line=t.lineStart}function updateSectionSummary(e,a){const t=a.variant;t===constants.Variant.BranchHit||t===constants.Variant.FunctionHit||t===constants.Variant.LineHit?e.hit+=a.hit:e.instrumented+=a.found}function createBranchSummary(e){return{block:e.block,branch:e.branch,hit:e.hit,isException:e.isException,line:e.line}}function createFunctionSummary(e){return{hit:e.variant===constants.Variant.FunctionExecution?e.hit:0,line:e.variant===constants.Variant.FunctionLocation?e.lineStart:0,name:e.name}}function createLineSummary(e){return{hit:e.hit,line:e.line}}function parseInteger(e){const a=parseInt(e);return isNaN(a)?0:a}function isBlankSpace(e){return e>=9&&e<=13||e===32||e===133||e===160}function l(e){if(e.incomplete)return intoNone(e);switch(e.variant){case constants.Variant.None:return intoNone(e);case constants.Variant.BranchHit:case constants.Variant.FunctionHit:case constants.Variant.LineHit:return transformHit(e);case constants.Variant.BranchInstrumented:case constants.Variant.FunctionInstrumented:case constants.Variant.LineInstrumented:return transformInstrumented(e);case constants.Variant.BranchLocation:return transformBranchLocation(e);case constants.Variant.EndOfRecord:return transformEndOfRecord(e);case constants.Variant.FilePath:return transformFilePath(e);case constants.Variant.FunctionExecution:return transformFunctionExecution(e);case constants.Variant.FunctionLocation:return transformFunctionLocation(e);case constants.Variant.LineLocation:return transformLineLocation(e);case constants.Variant.TestName:return transformTestName(e);case constants.Variant.Version:return transformVersion(e);case constants.Variant.Comment:return transformComment(e)}}function intoNone(e){return{done:e.done,incomplete:e.incomplete,variant:constants.Variant.None}}function transformHit(e){let a=0;return e.value!==null&&e.value.length!==0&&(a=parseInteger(e.value[0])),{done:e.done,hit:a,variant:e.variant}}function transformInstrumented(e){let a=0;return e.value!==null&&e.value.length!==0&&(a=parseInteger(e.value[0])),{done:e.done,found:a,variant:e.variant}}function transformBranchLocation(e){let a=0,t="",n=!1,r=0,i=0;if(e.value!==null&&e.value.length>=4){const u=e.value[e.value.length-1];r=parseInteger(e.value[0]),n=e.value[1].startsWith("e"),a=parseInteger(n?e.value[1].slice(1):e.value[1]),t=e.value.slice(2,-1).join(","),i=u==="-"?0:parseInteger(u)}return{block:a,done:e.done,branch:t,isException:n,line:r,hit:i,variant:e.variant}}function transformEndOfRecord(e){return{done:e.done,variant:e.variant}}function transformFilePath(e){let a="";return e.value!==null&&e.value.length!==0&&(a=e.value.join(",")),{done:e.done,path:a,variant:e.variant}}function transformFunctionExecution(e){let a=0,t="";return e.value!==null&&e.value.length>=2&&(a=parseInteger(e.value[0]),t=e.value[1]),{hit:a,done:e.done,name:t,variant:e.variant}}function transformFunctionLocation(e){let a=0,t=0,n="";return e.value!==null&&e.value.length>=2&&(t=parseInteger(e.value[0]),a=parseInteger(e.value[1]),n=a<t||e.value.length===2?e.value[1]:e.value.length>=3?e.value[2]:""),{done:e.done,lineEnd:a,lineStart:t,name:n,variant:e.variant}}function transformLineLocation(e){let a="",t=0,n=0;return e.value!==null&&e.value.length>=2&&(n=parseInteger(e.value[0]),t=parseInteger(e.value[1]),e.value.length>=3&&(a=e.value[2])),{checksum:a,done:e.done,hit:t,line:n,variant:e.variant}}function transformTestName(e){let a="";return e.value!==null&&e.value.length!==0&&(a=e.value[0]),{done:e.done,name:a,variant:e.variant}}function transformVersion(e){let a="";return e.value!==null&&e.value.length!==0&&(a=e.value[0]),{done:e.done,variant:e.variant,version:a}}function transformComment(e){return{done:e.done,variant:e.variant,comment:e.value!==null?e.value.join(","):""}}exports.createSection=createSection;exports.handleResult=handleResult;exports.isBlankSpace=isBlankSpace;exports.l=l;exports.updateResults=updateResults;
+
 
 /***/ }),
 

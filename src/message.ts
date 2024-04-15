@@ -1,4 +1,4 @@
-import { LcovFile } from 'lcov-parse'
+import { SectionSummary } from '@friedemannsommer/lcov-parser'
 import {
   CoveredProject,
   getLineCoverage,
@@ -87,12 +87,12 @@ function buildBody(project: CoveredProject): string {
   let tableMd = ''
   tableMd += '| File | Line Percentage | Line Count |\n'
   tableMd += '| --- | --- | --- |\n'
-  const folders: Record<string, LcovFile[]> = {}
+  const folders: Record<string, SectionSummary[]> = {}
 
   // Group files by folder
   for (const file of project.coverage) {
     const pubspecPath = project.pubspecFile.split('/').slice(0, -1).join('/')
-    const folder = file.file
+    const folder = file.path
       .split('/')
       .slice(0, -1)
       .join('/')
@@ -105,7 +105,7 @@ function buildBody(project: CoveredProject): string {
   for (const folder of Object.keys(folders).sort()) {
     tableMd += `| **${folder}** |   |   |\n`
     for (const file of folders[folder]) {
-      const name = file.file.split('/').slice(-1)[0]
+      const name = file.path.split('/').slice(-1)[0]
       tableMd += `| ${name} | ${getLineCoverage([file]).percentage.toFixed(
         2
       )} | ${file.lines.details.length} |\n`
