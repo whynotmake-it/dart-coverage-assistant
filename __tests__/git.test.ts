@@ -47,7 +47,7 @@ describe('getChanges', () => {
 
     expect(mockExec).toHaveBeenCalledWith(
       'git',
-      ['diff', '--name-only'],
+      ['diff', '--cached', '--name-only'],
       expect.any(Object)
     )
     expect(changes).toEqual('file1.txt\nfile2.txt\n')

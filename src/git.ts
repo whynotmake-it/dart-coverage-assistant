@@ -46,7 +46,7 @@ export async function commitAndPushChanges(
 export async function getChanges(): Promise<string> {
   let changes = ''
   await exec.exec('git', ['add', '.'])
-  await exec.exec('git', ['diff', '--name-only'], {
+  await exec.exec('git', ['diff', '--cached', '--name-only'], {
     listeners: {
       stdout: (data: Buffer) => {
         changes += data.toString()
