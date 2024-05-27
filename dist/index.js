@@ -20348,7 +20348,7 @@ exports.commitAndPushChanges = commitAndPushChanges;
 async function getChanges() {
     let changes = '';
     await exec.exec('git', ['add', '.']);
-    await exec.exec('git', ['diff', '--name-only'], {
+    await exec.exec('git', ['diff', '--cached', '--name-only'], {
         listeners: {
             stdout: (data) => {
                 changes += data.toString();
