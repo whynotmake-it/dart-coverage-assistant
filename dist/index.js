@@ -19907,7 +19907,7 @@ async function generateBadges(projects) {
         if (lineCoverage === undefined) {
             continue;
         }
-        const svg = await buildSvg(project.name, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, lineCoverage.percentage);
+        const svg = await buildSvg(`${project.name} Coverage`, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, lineCoverage.percentage);
         const path = project.pubspecFile.split('/').slice(0, -1).join('/');
         // write svg to file
         fs.writeFileSync(`${path}/coverage.svg`, svg);
@@ -19917,7 +19917,7 @@ async function generateBadges(projects) {
         if (totalLineCoverage === undefined) {
             return;
         }
-        const svg = await buildSvg('Test Coverage', config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, totalLineCoverage.percentage);
+        const svg = await buildSvg('Monorepo Coverage', config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, totalLineCoverage.percentage);
         fs.writeFileSync(`./coverage-total.svg`, svg);
     }
 }
@@ -20347,6 +20347,7 @@ exports.commitAndPushChanges = commitAndPushChanges;
  */
 async function getChanges() {
     let changes = '';
+    await exec.exec('git', ['add', '.']);
     await exec.exec('git', ['diff', '--name-only'], {
         listeners: {
             stdout: (data) => {
