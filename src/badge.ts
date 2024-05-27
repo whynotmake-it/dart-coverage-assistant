@@ -15,7 +15,7 @@ export async function generateBadges(
       continue
     }
     const svg = await buildSvg(
-      project.name,
+      `${project.name} Coverage`,
       Config.upperCoverageThreshold,
       Config.lowerCoverageThreshold,
       lineCoverage.percentage
@@ -31,7 +31,7 @@ export async function generateBadges(
       return
     }
     const svg = await buildSvg(
-      'Test Coverage',
+      'Monorepo Coverage',
       Config.upperCoverageThreshold,
       Config.lowerCoverageThreshold,
       totalLineCoverage.percentage
