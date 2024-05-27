@@ -15,7 +15,7 @@ export async function generateBadges(
       continue
     }
     const svg = await buildSvg(
-      `${project.name} Coverage`,
+      `${project.name} coverage`,
       Config.upperCoverageThreshold,
       Config.lowerCoverageThreshold,
       lineCoverage.percentage
@@ -31,7 +31,7 @@ export async function generateBadges(
       return
     }
     const svg = await buildSvg(
-      'Monorepo Coverage',
+      'monorepo coverage',
       Config.upperCoverageThreshold,
       Config.lowerCoverageThreshold,
       totalLineCoverage.percentage
@@ -67,7 +67,7 @@ export function buildBadgeUrl(
   } else {
     color = 'critical'
   }
-  const firstHalf = name ? `${name}-` : ''
+  const firstHalf = name ? `${name.replaceAll('_', '__')}-` : ''
   const secondHalf = `${percentage.toFixed(2)}%`
 
   return encodeURI(

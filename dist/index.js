@@ -19907,7 +19907,7 @@ async function generateBadges(projects) {
         if (lineCoverage === undefined) {
             continue;
         }
-        const svg = await buildSvg(`${project.name} Coverage`, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, lineCoverage.percentage);
+        const svg = await buildSvg(`${project.name} coverage`, config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, lineCoverage.percentage);
         const path = project.pubspecFile.split('/').slice(0, -1).join('/');
         // write svg to file
         fs.writeFileSync(`${path}/coverage.svg`, svg);
@@ -19917,7 +19917,7 @@ async function generateBadges(projects) {
         if (totalLineCoverage === undefined) {
             return;
         }
-        const svg = await buildSvg('Monorepo Coverage', config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, totalLineCoverage.percentage);
+        const svg = await buildSvg('monorepo coverage', config_1.Config.upperCoverageThreshold, config_1.Config.lowerCoverageThreshold, totalLineCoverage.percentage);
         fs.writeFileSync(`./coverage-total.svg`, svg);
     }
 }
@@ -19940,7 +19940,7 @@ function buildBadgeUrl(name, upper, lower, percentage) {
     else {
         color = 'critical';
     }
-    const firstHalf = name ? `${name}-` : '';
+    const firstHalf = name ? `${name.replaceAll('_', '__')}-` : '';
     const secondHalf = `${percentage.toFixed(2)}%`;
     return encodeURI(`http://img.shields.io/badge/${firstHalf}${secondHalf}-${color}`);
 }
