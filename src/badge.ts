@@ -67,7 +67,7 @@ export function buildBadgeUrl(
   } else {
     color = 'critical'
   }
-  const firstHalf = name ? `${name}-` : ''
+  const firstHalf = name ? `${name.replaceAll('_', '__')}-` : ''
   const secondHalf = `${percentage.toFixed(2)}%`
 
   return encodeURI(

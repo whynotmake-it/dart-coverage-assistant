@@ -19940,7 +19940,7 @@ function buildBadgeUrl(name, upper, lower, percentage) {
     else {
         color = 'critical';
     }
-    const firstHalf = name ? `${name}-` : '';
+    const firstHalf = name ? `${name.replaceAll('_', '__')}-` : '';
     const secondHalf = `${percentage.toFixed(2)}%`;
     return encodeURI(`http://img.shields.io/badge/${firstHalf}${secondHalf}-${color}`);
 }
