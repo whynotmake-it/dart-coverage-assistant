@@ -123,7 +123,7 @@ function buildBody(project: CoveredProject): string {
 
 function buildDiffString(diff: number | undefined): string {
   if (diff === undefined) {
-    return '-'
+    return ''
   }
   if (diff === 0) {
     return `➡️ ${diff.toFixed(2)}%`
