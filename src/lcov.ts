@@ -119,8 +119,11 @@ export function getTotalPercentage(
 
 export function getTotalPercentageBefore(
   projects: CoveredProject[]
-): LineCoverage {
-  return getLineCoverage(getSectionSummaries(projects, 'coverageBefore'))
+): LineCoverage | undefined {
+  if (projects.some(p => p.coverageBefore !== undefined)) {
+    return getLineCoverage(getSectionSummaries(projects, 'coverageBefore'))
+  }
+  return undefined
 }
 
 function getSectionSummaries(

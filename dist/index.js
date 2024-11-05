@@ -20452,7 +20452,10 @@ function getTotalPercentage(projects) {
 }
 exports.getTotalPercentage = getTotalPercentage;
 function getTotalPercentageBefore(projects) {
-    return getLineCoverage(getSectionSummaries(projects, 'coverageBefore'));
+    if (projects.some(p => p.coverageBefore !== undefined)) {
+        return getLineCoverage(getSectionSummaries(projects, 'coverageBefore'));
+    }
+    return undefined;
 }
 exports.getTotalPercentageBefore = getTotalPercentageBefore;
 function getSectionSummaries(projects, coverageKey) {
@@ -20711,7 +20714,7 @@ function buildBody(project) {
 }
 function buildDiffString(diff) {
     if (diff === undefined) {
-        return '-';
+        return '';
     }
     if (diff === 0) {
         return `➡️ ${diff.toFixed(2)}%`;
